@@ -26,6 +26,9 @@ importers:
       '@teachernow/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@teachernow/hr':
+        specifier: workspace:*
+        version: link:../../packages/modules/hr
       '@teachernow/ledger':
         specifier: workspace:*
         version: link:../../packages/modules/ledger
