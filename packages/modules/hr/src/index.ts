@@ -29,3 +29,11 @@ export {
   type CompleteInterviewInput,
   type InterviewDecision,
 } from "./interviews.js";
+export {
+  createInviteToken,
+  getTeacherByInviteToken,
+  revokeInviteTokens,
+  type CreateInviteTokenInput,
+  type InviteTokenDocument,
+  type InviteTokenTeacher,
+} from "./invites.js";

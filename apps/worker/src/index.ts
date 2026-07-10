@@ -1,9 +1,12 @@
-// Worker girişi: pg-boss saatte bir invariant sentinel'i koşturur.
+// Worker girişi: pg-boss saatte bir invariant sentinel'i, günde bir HR hatırlatma
+// taramasını koşturur.
 import PgBoss from "pg-boss";
 import { makePool } from "@teachernow/db";
+import { runHrReminders } from "./hr-reminders.js";
 import { runInvariantSentinel } from "./sentinel.js";
 
 const SENTINEL_QUEUE = "invariant-sentinel";
+const HR_REMINDERS_QUEUE = "hr-reminders";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -25,6 +28,15 @@ async function main(): Promise<void> {
     }
   });
 
+  await boss.createQueue(HR_REMINDERS_QUEUE);
+  await boss.schedule(HR_REMINDERS_QUEUE, "0 6 * * *");
+  await boss.work(HR_REMINDERS_QUEUE, async () => {
+    const result = await runHrReminders(pool);
+    if (result.reminded > 0) {
+      console.log(`hr-reminders: ${result.reminded} eğitmen için hatırlatma kaydı yazıldı`);
+    }
+  });
+
   let stopping = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (stopping) return; // çifte sinyalde stop'u tekrar çağırma
@@ -37,7 +49,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
 
-  console.log("worker: hazır (invariant-sentinel saatlik zamanlandı)");
+  console.log("worker: hazır (invariant-sentinel saatlik, hr-reminders günlük zamanlandı)");
 }
 
 main().catch((err) => {

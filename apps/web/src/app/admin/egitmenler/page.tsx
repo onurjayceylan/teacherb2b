@@ -162,6 +162,9 @@ export default function EgitmenlerPage() {
 
   const [docDrafts, setDocDrafts] = useState<Record<string, DocDraft>>({});
 
+  // Üretilen davet linkleri satır bazında gösterilir; ham token yalnız bu state'te yaşar.
+  const [inviteLinks, setInviteLinks] = useState<Record<string, string>>({});
+
   const [schedTeacherId, setSchedTeacherId] = useState("");
   const [schedAt, setSchedAt] = useState("");
 
@@ -273,6 +276,7 @@ export default function EgitmenlerPage() {
                   <th>Payout</th>
                   <th>Durum ilerlet</th>
                   <th>Evrak güncelle</th>
+                  <th>Davet linki</th>
                 </tr>
               </thead>
               <tbody>
@@ -384,6 +388,54 @@ export default function EgitmenlerPage() {
                             Kaydet
                           </button>
                         </div>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                          <button
+                            className="secondary"
+                            style={{ marginTop: 0 }}
+                            disabled={busy}
+                            onClick={() =>
+                              void run(async () => {
+                                const res = await trpc.hr.createInvite.mutate({ teacherId: t.id });
+                                setInviteLinks((prev) => ({ ...prev, [t.id]: res.url }));
+                              }, "Davet linki üretildi — linki kopyalayıp eğitmene iletin")
+                            }
+                          >
+                            Davet linki
+                          </button>
+                          <button
+                            className="secondary"
+                            style={{ marginTop: 0 }}
+                            disabled={busy}
+                            onClick={() =>
+                              void run(async () => {
+                                await trpc.hr.revokeInvites.mutate({ teacherId: t.id });
+                                setInviteLinks((prev) => {
+                                  const next = { ...prev };
+                                  delete next[t.id];
+                                  return next;
+                                });
+                              }, "Açık davet linkleri iptal edildi")
+                            }
+                          >
+                            İptal et
+                          </button>
+                        </div>
+                        {inviteLinks[t.id] ? (
+                          <div
+                            className="mono"
+                            style={{
+                              marginTop: "0.35rem",
+                              maxWidth: "18rem",
+                              wordBreak: "break-all",
+                              userSelect: "all",
+                              fontSize: "0.75rem",
+                            }}
+                          >
+                            {inviteLinks[t.id]}
+                          </div>
+                        ) : null}
                       </td>
                     </tr>
                   );

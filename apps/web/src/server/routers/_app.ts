@@ -6,6 +6,7 @@ import { lessonsRouter } from "./lessons";
 import { meRouter } from "./me";
 import { onboardingRouter } from "./onboarding";
 import { rosterRouter } from "./roster";
+import { teacherOnboardingRouter } from "./teacher-onboarding";
 import { topupRouter } from "./topup";
 import { walletRouter } from "./wallet";
 
@@ -16,6 +17,7 @@ export const appRouter = router({
   topup: topupRouter,
   admin: adminRouter,
   hr: hrRouter,
+  teacherOnboarding: teacherOnboardingRouter,
   roster: rosterRouter,
   lessons: lessonsRouter,
 });

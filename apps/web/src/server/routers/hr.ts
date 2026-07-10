@@ -4,10 +4,12 @@ import { z } from "zod";
 import {
   advanceStatus,
   completeInterview,
+  createInviteToken,
   importTeachers,
   inviteTeacher,
   listPipeline,
   missingDocuments,
+  revokeInviteTokens,
   scheduleInterview,
   upsertDocument,
 } from "@teachernow/hr";
@@ -65,6 +67,26 @@ export const hrRouter = router({
         }),
       );
       return { id };
+    }),
+
+  // Onboarding davet linki: ham token yalnız dönen URL'de yaşar (DB'de hash durur).
+  createInvite: platformProcedure
+    .input(z.object({ teacherId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const { token } = await ctx.pool.withPlatform(async (db) =>
+        createInviteToken(db, { teacherId: input.teacherId, createdBy: ctx.actor.userId }),
+      );
+      const base = (process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3010").replace(/\/+$/, "");
+      return { url: `${base}/egitmen/davet/${token}` };
+    }),
+
+  revokeInvites: platformProcedure
+    .input(z.object({ teacherId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const revoked = await ctx.pool.withPlatform(async (db) =>
+        revokeInviteTokens(db, input.teacherId),
+      );
+      return { revoked };
     }),
 
   import: platformProcedure
