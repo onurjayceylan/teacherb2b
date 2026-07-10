@@ -15,3 +15,8 @@ export {
   type StripeEventInput,
   type StripeEventResult,
 } from "./stripe.js";
+export {
+  chargeManualLesson,
+  type ChargeManualLessonInput,
+  type ChargeManualLessonResult,
+} from "./lessons.js";

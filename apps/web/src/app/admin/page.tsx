@@ -36,6 +36,26 @@ const EMPTY_FORM = {
   swift_bic: "",
 };
 
+interface SchoolOption {
+  id: string;
+  name: string;
+}
+
+interface TeacherOption {
+  id: string;
+  fullName: string;
+}
+
+const EMPTY_LESSON = {
+  schoolId: "",
+  teacherId: "",
+  lessonDate: "",
+  minutes: "40",
+  chargeUsd: "",
+  teacherPayUsd: "",
+  note: "",
+};
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingTopup[]>([]);
   const [accounts, setAccounts] = useState<AdminBankAccount[]>([]);
@@ -46,19 +66,26 @@ export default function AdminPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
+  const [schools, setSchools] = useState<SchoolOption[]>([]);
+  const [teachers, setTeachers] = useState<TeacherOption[]>([]);
+  const [lesson, setLesson] = useState(EMPTY_LESSON);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [pendingRes, accountsRes, frozenRes] = await Promise.all([
+      const [pendingRes, accountsRes, frozenRes, schoolsRes, teachersRes] = await Promise.all([
         trpc.admin.listPendingTopups.query(),
         trpc.admin.listBankAccounts.query(),
         trpc.admin.paymentsFrozen.query(),
+        trpc.lessons.listSchools.query(),
+        trpc.lessons.listActiveTeachers.query(),
       ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
       setFrozen(frozenRes.frozen);
+      setSchools(schoolsRes);
+      setTeachers(teachersRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -99,12 +126,150 @@ export default function AdminPage() {
     );
   }
 
+  function parseUsdCents(value: string): number | null {
+    const amount = Number(value.replace(",", "."));
+    if (!Number.isFinite(amount) || amount < 0) return null;
+    return Math.round(amount * 100);
+  }
+
   return (
     <main>
       <h1>Platform yönetimi</h1>
+      <p className="muted">
+        <a href="/admin/egitmenler">Eğitmen yönetimi (pipeline, davet, evrak, görüşme) →</a>
+      </p>
 
       {actionError ? <p className="error">{actionError}</p> : null}
       {notice ? <p className="success">{notice}</p> : null}
+
+      <div className="card">
+        <h2>Manuel ders kaydı (Wizard-of-Oz)</h2>
+        <p className="muted">
+          Satış tutarı okulun cüzdanından düşer; eğitmen ücreti maliyet olarak ledger&apos;a işlenir.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const chargeCents = parseUsdCents(lesson.chargeUsd);
+            const teacherPayCents = parseUsdCents(lesson.teacherPayUsd);
+            const minutes = Number(lesson.minutes);
+            if (!chargeCents || chargeCents <= 0 || teacherPayCents === null) {
+              setActionError("Geçerli tutarlar girin");
+              return;
+            }
+            if (!Number.isInteger(minutes) || minutes <= 0) {
+              setActionError("Geçerli dakika girin");
+              return;
+            }
+            void run(async () => {
+              const res = await trpc.lessons.chargeManual.mutate({
+                schoolId: lesson.schoolId,
+                teacherId: lesson.teacherId,
+                lessonDate: lesson.lessonDate,
+                minutes,
+                chargeCents,
+                teacherPayCents,
+                ...(lesson.note ? { note: lesson.note } : {}),
+              });
+              setLesson(EMPTY_LESSON);
+              setNotice(`Ders kaydedildi — işlem (txn): ${res.txnId}`);
+            }, "Ders kaydedildi");
+          }}
+        >
+          <div className="row">
+            <div>
+              <label htmlFor="ml-school">Okul</label>
+              <select
+                id="ml-school"
+                value={lesson.schoolId}
+                onChange={(e) => setLesson({ ...lesson, schoolId: e.target.value })}
+                required
+              >
+                <option value="">Seçin…</option>
+                {schools.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="ml-teacher">Eğitmen (aktif)</label>
+              <select
+                id="ml-teacher"
+                value={lesson.teacherId}
+                onChange={(e) => setLesson({ ...lesson, teacherId: e.target.value })}
+                required
+              >
+                <option value="">Seçin…</option>
+                {teachers.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.fullName}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="row">
+            <div>
+              <label htmlFor="ml-date">Ders tarihi</label>
+              <input
+                id="ml-date"
+                type="date"
+                value={lesson.lessonDate}
+                onChange={(e) => setLesson({ ...lesson, lessonDate: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="ml-minutes">Dakika</label>
+              <input
+                id="ml-minutes"
+                inputMode="numeric"
+                value={lesson.minutes}
+                onChange={(e) => setLesson({ ...lesson, minutes: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="ml-charge">Satış (USD)</label>
+              <input
+                id="ml-charge"
+                inputMode="decimal"
+                value={lesson.chargeUsd}
+                onChange={(e) => setLesson({ ...lesson, chargeUsd: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="ml-pay">Eğitmen ücreti (USD)</label>
+              <input
+                id="ml-pay"
+                inputMode="decimal"
+                value={lesson.teacherPayUsd}
+                onChange={(e) => setLesson({ ...lesson, teacherPayUsd: e.target.value })}
+                required
+              />
+            </div>
+          </div>
+          <div className="row">
+            <div>
+              <label htmlFor="ml-note">Not (opsiyonel)</label>
+              <input
+                id="ml-note"
+                value={lesson.note}
+                onChange={(e) => setLesson({ ...lesson, note: e.target.value })}
+              />
+            </div>
+          </div>
+          <button type="submit" disabled={busy || teachers.length === 0 || schools.length === 0}>
+            Dersi kaydet
+          </button>
+          {teachers.length === 0 ? (
+            <p className="muted">Aktif eğitmen yok — önce eğitmen pipeline&apos;ını tamamlayın.</p>
+          ) : null}
+        </form>
+      </div>
 
       <div className="card">
         <h2>Ödeme kill-switch</h2>

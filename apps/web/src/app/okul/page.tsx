@@ -169,6 +169,9 @@ export default function OkulPage() {
   return (
     <main>
       <h1>{school.name}</h1>
+      <p className="muted">
+        <a href="/okul/siniflar">Sınıflar ve öğrenciler (roster) →</a>
+      </p>
       {me.schools.length > 1 ? (
         <p>
           <label htmlFor="school-switch" className="muted">
