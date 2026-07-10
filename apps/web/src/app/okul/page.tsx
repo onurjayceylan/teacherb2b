@@ -8,6 +8,7 @@ interface Me {
   email: string;
   isPlatformAdmin: boolean;
   schools: { id: string; name: string }[];
+  activeSchoolId: string | null;
   stripeConfigured: boolean;
 }
 
@@ -136,7 +137,7 @@ export default function OkulPage() {
     );
   }
 
-  const school = me?.schools[0];
+  const school = me?.schools.find((s) => s.id === me.activeSchoolId) ?? me?.schools[0];
   if (!me || !school) {
     return (
       <main>
@@ -155,9 +156,37 @@ export default function OkulPage() {
     ? bankAccounts.filter((a) => !bankAccountId || a.id === bankAccountId)
     : [];
 
+  async function switchSchool(schoolId: string) {
+    // Cookie yalnız tercih; yetki sunucuda üyelikle yeniden doğrulanır.
+    const res = await fetch("/api/active-school", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ schoolId }),
+    });
+    if (res.ok) await load();
+  }
+
   return (
     <main>
       <h1>{school.name}</h1>
+      {me.schools.length > 1 ? (
+        <p>
+          <label htmlFor="school-switch" className="muted">
+            Aktif okul:{" "}
+          </label>
+          <select
+            id="school-switch"
+            value={school.id}
+            onChange={(e) => void switchSchool(e.target.value)}
+          >
+            {me.schools.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        </p>
+      ) : null}
 
       <div className="card">
         <h2>Cüzdan bakiyesi</h2>

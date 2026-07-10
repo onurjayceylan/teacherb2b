@@ -1,5 +1,5 @@
-// me: aktör bilgisi + üyesi olunan okullar (UI'ın açılış sorgusu).
-import { authedProcedure, router } from "../trpc";
+// me: aktör bilgisi + üyesi olunan okullar + aktif okul (UI'ın açılış sorgusu).
+import { authedProcedure, resolveActiveSchoolId, router } from "../trpc";
 
 export const meRouter = router({
   get: authedProcedure.query(async ({ ctx }) => {
@@ -17,6 +17,7 @@ export const meRouter = router({
       email: ctx.actor.email,
       isPlatformAdmin: ctx.actor.isPlatformAdmin,
       schools,
+      activeSchoolId: resolveActiveSchoolId(ctx.actor, ctx.preferredSchoolId) ?? null,
       // UI kart top-up butonunu devre dışı bırakabilsin diye (sır sızdırmaz, yalnız var/yok).
       stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
     };

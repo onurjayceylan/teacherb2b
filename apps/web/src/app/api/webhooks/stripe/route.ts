@@ -22,16 +22,24 @@ export async function POST(req: Request): Promise<Response> {
     return Response.json({ error: "imza doğrulanamadı" }, { status: 400 });
   }
 
-  // payment_intent alanı olmayan event'lerde nesnenin kendi id'si denenir (skip edilir).
-  const obj = event.data.object as { payment_intent?: string | null; id?: string };
+  const obj = event.data.object as {
+    payment_intent?: string | null;
+    id?: string;
+    payment_status?: string;
+  };
+  // checkout.session.* event'lerinde nesnenin id'si session id'dir; topup buradan bulunur.
+  // PI fallback'i (obj.id) yalnız PI-nesneli event'lerde geçerli — checkout'ta session id PI sanılmasın.
+  const isCheckout = event.type.startsWith("checkout.session.");
   const paymentIntentId =
-    typeof obj.payment_intent === "string" ? obj.payment_intent : obj.id;
+    typeof obj.payment_intent === "string" ? obj.payment_intent : isCheckout ? undefined : obj.id;
 
   try {
     const result = await processStripeEvent(getPool(), {
       id: event.id,
       type: event.type,
       ...(paymentIntentId ? { paymentIntentId } : {}),
+      ...(isCheckout && obj.id ? { checkoutSessionId: obj.id } : {}),
+      ...(isCheckout && obj.payment_status ? { paymentStatus: obj.payment_status } : {}),
     });
     // Duplicate = yapısal no-op; Stripe'a yine 200 (tekrar denemesin).
     return Response.json({ received: true, duplicate: result.duplicate });

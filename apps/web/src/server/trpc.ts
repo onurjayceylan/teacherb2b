@@ -17,6 +17,25 @@ export interface Actor {
 export interface Context {
   actor: Actor | null;
   pool: ActorPool;
+  /** tn_active_school cookie'sinden gelen tercih; üyelik doğrulaması schoolProcedure'da. */
+  preferredSchoolId: string | null;
+}
+
+const ACTIVE_SCHOOL_COOKIE = "tn_active_school";
+
+function readCookie(header: string | null, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(rest.join("="));
+  }
+  return null;
+}
+
+/** Tercih edilen okul üyelikler içindeyse onu, değilse ilk üyeliği seçer. */
+export function resolveActiveSchoolId(actor: Actor, preferred: string | null): string | undefined {
+  if (preferred && actor.schoolIds.includes(preferred)) return preferred;
+  return actor.schoolIds[0];
 }
 
 interface AppUserRow {
@@ -26,8 +45,9 @@ interface AppUserRow {
 
 export async function createContext(req: Request): Promise<Context> {
   const pool = getPool();
+  const preferredSchoolId = readCookie(req.headers.get("cookie"), ACTIVE_SCHOOL_COOKIE);
   const session = await auth.api.getSession({ headers: req.headers });
-  if (!session) return { actor: null, pool };
+  if (!session) return { actor: null, pool, preferredSchoolId };
 
   const email = session.user.email;
   const name = session.user.name ?? null;
@@ -62,7 +82,7 @@ export async function createContext(req: Request): Promise<Context> {
     };
   });
 
-  return { actor, pool };
+  return { actor, pool, preferredSchoolId };
 }
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });
@@ -78,13 +98,14 @@ export const authedProcedure = t.procedure.use(({ ctx, next }) => {
 });
 
 export const schoolProcedure = authedProcedure.use(({ ctx, next }) => {
-  const activeSchoolId = ctx.actor.schoolIds[0];
+  const activeSchoolId = resolveActiveSchoolId(ctx.actor, ctx.preferredSchoolId);
   if (!activeSchoolId) {
     throw new TRPCError({ code: "FORBIDDEN", message: "okul üyeliği yok — önce okul oluşturun" });
   }
-  // Handler'lar ham pool'a değil, okul bağlamına sarılmış db'ye erişir (RLS ikinci hat).
+  // Handler'lar ham pool'a değil, AKTİF okul bağlamına sarılmış db'ye erişir (RLS ikinci hat).
+  // Bilinçli daraltma: cüzdan/top-up işlemleri seçili okulla sınırlı — yanlış okula işlem imkânsız.
   const withSchoolDb = <T>(fn: (db: Db) => Promise<T>): Promise<T> =>
-    ctx.pool.withSchool(ctx.actor.schoolIds, fn);
+    ctx.pool.withSchool([activeSchoolId], fn);
   return next({ ctx: { ...ctx, activeSchoolId, withSchoolDb } });
 });
 
