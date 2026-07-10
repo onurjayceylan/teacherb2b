@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "scripts": { "typecheck": "tsc --noEmit", "test": "vitest run", "start": "tsx src/index.ts" },
-  "dependencies": { "@teachernow/db": "workspace:*", "@teachernow/ledger": "workspace:*", "pg": "^8.13.1", "pg-boss": "^10.1.5" },
+  "dependencies": { "@teachernow/db": "workspace:*", "@teachernow/dispatch": "workspace:*", "@teachernow/ledger": "workspace:*", "pg": "^8.13.1", "pg-boss": "^10.1.5" },
   "devDependencies": { "@types/node": "^22.10.0", "@types/pg": "^8.11.10", "tsx": "^4.19.2", "typescript": "^5.6.3", "vitest": "^2.1.8" }
 }

@@ -31,6 +31,9 @@
       ],
       "@teachernow/hr": [
         "packages/modules/hr/src/index.ts"
+      ],
+      "@teachernow/dispatch": [
+        "packages/modules/dispatch/src/index.ts"
       ]
     }
   }

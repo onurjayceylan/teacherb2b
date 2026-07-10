@@ -90,6 +90,9 @@ importers:
       '@teachernow/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@teachernow/dispatch':
+        specifier: workspace:*
+        version: link:../../packages/modules/dispatch
       '@teachernow/ledger':
         specifier: workspace:*
         version: link:../../packages/modules/ledger
@@ -153,6 +156,34 @@ importers:
         specifier: ^17.4.0
         version: 17.7.0
     devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.1
+      '@types/pg':
+        specifier: ^8.11.10
+        version: 8.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)
+
+  packages/modules/dispatch:
+    dependencies:
+      '@teachernow/db':
+        specifier: workspace:*
+        version: link:../../db
+      luxon:
+        specifier: ^3.5.0
+        version: 3.7.2
+      pg:
+        specifier: ^8.13.1
+        version: 8.22.0
+    devDependencies:
+      '@types/luxon':
+        specifier: ^3.4.2
+        version: 3.7.2
       '@types/node':
         specifier: ^22.10.0
         version: 22.20.1
@@ -1000,6 +1031,9 @@ packages:
 
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
+
+  '@types/luxon@3.7.2':
+    resolution: {integrity: sha512-gW+Oib+vUtGJBtNC8V9Reww0oIpusw+4m81uncg9REGZAJfqOQHfo/nkabnc7w0QReXyPqjrbWMJk6NuAkiX3Q==}
 
   '@types/node@22.20.1':
     resolution: {integrity: sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q==}
@@ -2197,6 +2231,8 @@ snapshots:
       typescript: 5.9.3
 
   '@types/estree@1.0.9': {}
+
+  '@types/luxon@3.7.2': {}
 
   '@types/node@22.20.1':
     dependencies:
