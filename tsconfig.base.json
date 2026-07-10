@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "declaration": true,
+    "sourceMap": true,
+    "baseUrl": ".",
+    "paths": {
+      "@teachernow/db": ["packages/db/src/index.ts"],
+      "@teachernow/ledger": ["packages/modules/ledger/src/index.ts"],
+      "@teachernow/billing": ["packages/modules/billing/src/index.ts"],
+      "@teachernow/tenancy": ["packages/modules/tenancy/src/index.ts"]
+    }
+  }
+}

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Bağımlılıkları kur
+        run: pnpm install --frozen-lockfile
+
+      - name: Migration smoke (iki kez koş = idempotent olmalı)
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: |
+          createdb teachernow_ci
+          DATABASE_URL=postgres://postgres@localhost:5432/teachernow_ci pnpm db:migrate
+          DATABASE_URL=postgres://postgres@localhost:5432/teachernow_ci pnpm db:migrate
+
+      - name: Ledger invariant kontrolü
+        env:
+          PGHOST: localhost
+          PGUSER: postgres
+        run: |
+          psql -d teachernow_ci -c 'SELECT * FROM ledger_invariant_violations()'
+          violations=$(psql -d teachernow_ci -tA -c 'SELECT count(*) FROM ledger_invariant_violations()')
+          if [ "$violations" != "0" ]; then
+            echo "ledger invariant ihlali: $violations satır"
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        env:
+          DATABASE_ADMIN_URL: postgres://postgres@localhost:5432/postgres
+        run: pnpm test
+
+      - name: Modül sınırları (dependency-cruiser)
+        run: pnpm lint:boundaries
+
+      - name: PII linter
+        run: pnpm lint:pii
