@@ -94,6 +94,14 @@ interface Reconciliation {
   diffCents: number | null;
 }
 
+// Wise fonlama olayı (tur-2 P1-D): kurucunun Wise'a aktardığı payout float'ı.
+interface WiseFunding {
+  id: string;
+  amountCents: number;
+  note: string | null;
+  createdAt: Date;
+}
+
 const CHARGEBACK_STATUS: Record<string, { label: string; ok: boolean }> = {
   needs_response: { label: "yanıt bekliyor", ok: false },
   under_review: { label: "incelemede", ok: false },
@@ -152,23 +160,29 @@ export default function OdemelerPage() {
   const [reconciliation, setReconciliation] = useState<Reconciliation[]>([]);
   const [wiseBalance, setWiseBalance] = useState("");
   const [wiseNote, setWiseNote] = useState("");
+  const [fundings, setFundings] = useState<WiseFunding[]>([]);
+  const [fundAmount, setFundAmount] = useState("");
+  const [fundNote, setFundNote] = useState("");
 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const [batchesRes, recentRes, missingRes, chargebacksRes, balancesRes] = await Promise.all([
-        trpc.payouts.listBatches.query(),
-        trpc.payouts.listRecent.query(),
-        trpc.payouts.missingPayoutDetails.query(),
-        trpc.admin.listChargebacks.query(),
-        trpc.admin.listExternalBalances.query(),
-      ]);
+      const [batchesRes, recentRes, missingRes, chargebacksRes, balancesRes, fundingsRes] =
+        await Promise.all([
+          trpc.payouts.listBatches.query(),
+          trpc.payouts.listRecent.query(),
+          trpc.payouts.missingPayoutDetails.query(),
+          trpc.admin.listChargebacks.query(),
+          trpc.admin.listExternalBalances.query(),
+          trpc.admin.listWiseFundings.query(),
+        ]);
       setBatches(batchesRes);
       setRecent(recentRes);
       setMissingPayout(missingRes);
       setChargebacks(chargebacksRes);
       setSnapshots(balancesRes.snapshots);
       setReconciliation(balancesRes.reconciliation);
+      setFundings(fundingsRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -632,10 +646,87 @@ export default function OdemelerPage() {
           </table>
         </div>
 
-        <h3 style={{ marginTop: "1rem" }}>Manuel Wise bakiye girişi</h3>
+        <h3 style={{ marginTop: "1.5rem" }}>Wise&apos;a para aktardım (fonlama)</h3>
+        <p className="muted">
+          Kendi bankandan Wise&apos;a payout float&apos;u aktardığında BURAYA gir. Bu bir PARA
+          HAREKETİDİR (ledger&apos;a çift-kayıt işler: wise_clearing −X, platform_capital +X) —
+          böylece &quot;Ledger beklentisi&quot; gerçek Wise bakiyesini yansıtır ve mutabakat yalnız
+          GERÇEK farkta uyarır. Yalnızca gerçekten transfer yaptığında gir; bakiye okumak için
+          aşağıdaki &quot;bakiye girişi&quot;ni kullan.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const parsed = Number(fundAmount.replace(",", "."));
+            if (!Number.isFinite(parsed) || parsed <= 0) {
+              setActionError("Geçerli bir pozitif tutar girin (örn. 500.00)");
+              return;
+            }
+            void run(async () => {
+              await trpc.admin.recordWiseFunding.mutate({
+                amountUsd: parsed,
+                ...(fundNote.trim() ? { note: fundNote.trim() } : {}),
+              });
+              setFundAmount("");
+              setFundNote("");
+            }, "Wise fonlaması ledger'a işlendi");
+          }}
+        >
+          <div className="row">
+            <div>
+              <label htmlFor="fund-amount">Aktarılan tutar (USD)</label>
+              <input
+                id="fund-amount"
+                inputMode="decimal"
+                value={fundAmount}
+                onChange={(e) => setFundAmount(e.target.value)}
+                placeholder="500.00"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="fund-note">Not (opsiyonel)</label>
+              <input
+                id="fund-note"
+                value={fundNote}
+                onChange={(e) => setFundNote(e.target.value)}
+                placeholder="örn. 11 Tem banka→Wise transferi"
+              />
+            </div>
+            <div className="actions">
+              <button type="submit" disabled={busy}>
+                Fonlamayı işle
+              </button>
+            </div>
+          </div>
+        </form>
+        {fundings.length > 0 ? (
+          <div className="table-wrap" style={{ marginTop: "0.75rem" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tarih</th>
+                  <th>Tutar</th>
+                  <th>Not</th>
+                </tr>
+              </thead>
+              <tbody>
+                {fundings.map((f) => (
+                  <tr key={f.id}>
+                    <td>{new Date(f.createdAt).toLocaleString("tr-TR")}</td>
+                    <td>{formatCents(f.amountCents)}</td>
+                    <td className="muted">{f.note ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        <h3 style={{ marginTop: "1.5rem" }}>Manuel Wise bakiye girişi</h3>
         <p className="muted">
           Wise panosunda görünen güncel bakiyeyi girin (USD). Para OYNAMAZ — yalnız mutabakat
-          kaydı oluşur.
+          kaydı oluşur (yukarıdaki &quot;Ledger beklentisi&quot; ile karşılaştırılır).
         </p>
         <form
           onSubmit={(e) => {

@@ -24,3 +24,10 @@ export {
   type TeacherPayoutRow,
   type TeacherMissingPayoutDetailsRow,
 } from "./queries.js";
+export {
+  recordWiseFunding,
+  listWiseFundings,
+  type RecordWiseFundingInput,
+  type RecordWiseFundingResult,
+  type WiseFundingRow,
+} from "./funding.js";

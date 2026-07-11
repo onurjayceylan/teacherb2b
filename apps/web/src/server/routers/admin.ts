@@ -6,6 +6,7 @@ import { adminSettleBankTopup } from "@teachernow/billing";
 import { getSlotForUpdate, materializePlans, offerNext } from "@teachernow/dispatch";
 import { timezoneSchema } from "@teachernow/hr";
 import { isPaymentsFrozen, setPaymentsFrozen } from "@teachernow/ledger";
+import { listWiseFundings, recordWiseFunding } from "@teachernow/payouts";
 import { resolveDispute, settleSession, voidRejectedSession } from "@teachernow/sessions";
 import { platformProcedure, router } from "../trpc";
 import { baseUrl } from "./teacher-portal";
@@ -1080,6 +1081,34 @@ export const adminRouter = router({
               : 1,
         );
     });
+  }),
+
+  // ---- Wise fonlaması (tur-2 P1-D: çift-kayıt) ----
+
+  // Kurucu kendi bankasından Wise'a payout float'u aktardığında BUNU ledger'a yazar:
+  // [wise_clearing −X, platform_capital +X]. Böylece −SUM(wise_clearing) = fonlama − ödenen =
+  // Wise'ın GERÇEK bakiyesi olur ve mutabakat (aşağıda) anlamlı hâle gelir. PARA HAREKETİDİR
+  // (snapshot değil): yalnız gerçekten transfer yaptığında gir.
+  recordWiseFunding: platformProcedure
+    .input(
+      z.object({
+        amountUsd: z.number().positive().max(10_000_000),
+        note: z.string().trim().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const amountCents = Math.round(input.amountUsd * 100);
+      return ctx.pool.withPlatform((db) =>
+        recordWiseFunding(db, {
+          amountCents,
+          createdBy: ctx.actor.userId,
+          ...(input.note ? { note: input.note } : {}),
+        }),
+      );
+    }),
+
+  listWiseFundings: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform((db) => listWiseFundings(db));
   }),
 
   // ---- Dış bakiye mutabakatı (denetim P1) ----

@@ -15,7 +15,8 @@ export type AccountKind =
   | "bank_clearing"
   | "wise_clearing"
   | "fx_gain_loss"
-  | "adjustment_reserve";
+  | "adjustment_reserve"
+  | "platform_capital";
 
 export interface EnsureAccountParams {
   ownerType: AccountOwnerType;
