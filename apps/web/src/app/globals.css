@@ -1,36 +1,33 @@
-/* Teachernow tasarım sistemi — "liquid glass" (Apple 2026 iOS esintili, light).
-   Kural: SIFIR UI kütüphanesi — saf CSS + system font. Mevcut sınıf adları
-   (card/badge/muted/mono/row/topbar/shell/balance/error/success) aynen korunur ki
-   tüm sayfalar merkezi olarak dönüşsün; yeni yardımcılar (stat/table-wrap/empty/
-   actions/hero) sayfa cilası için eklendi. */
+/* Teachernow tasarım sistemi v2 — "liquid glass" (Apple 2026 iOS, light).
+   v1 eleştirisi: fon çok soluk kaldı, her şey gri kutu gibi okundu; düğmeler küçük
+   ve eski form düğmesiydi. v2: canlı renk blobları üstünde gerçek cam (yüksek blur,
+   doygunluk, speküler kenar ışığı), hap düğmeler, renkli gölgeler, büyük tipografi.
+   Kural aynı: SIFIR UI kütüphanesi; sınıf adları API'si değişmez. */
 
 :root {
-  /* mürekkep + yüzeyler */
-  --ink: #16181d;
-  --muted: #6b7280;
-  --bg: #f4f5f9;
-  --glass: rgba(255, 255, 255, 0.62);
-  --glass-strong: rgba(255, 255, 255, 0.8);
-  --hairline: rgba(22, 24, 29, 0.08);
-  --glass-edge: rgba(255, 255, 255, 0.65);
-
-  /* iOS paleti (light) */
+  --ink: #0e1220;
+  --muted: #5c677f;
   --accent: #0a7cff;
-  --accent-deep: #0063d6;
-  --ok: #1d8a3a;
-  --ok-tint: rgba(52, 199, 89, 0.16);
-  --danger: #c2251c;
-  --danger-strong: #e0281d;
-  --danger-tint: rgba(255, 59, 48, 0.12);
-  --info-tint: rgba(10, 124, 255, 0.1);
+  --accent-deep: #0060d6;
+  --ok: #178a3e;
+  --ok-tint: rgba(48, 209, 88, 0.16);
+  --danger: #d92d20;
+  --danger-tint: rgba(255, 69, 58, 0.13);
+  --info-tint: rgba(10, 124, 255, 0.11);
 
-  /* biçim */
+  --r-xl: 28px;
   --r-lg: 22px;
-  --r-md: 14px;
-  --r-sm: 11px;
-  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 30px rgba(16, 24, 40, 0.07);
-  --shadow-float: 0 2px 6px rgba(16, 24, 40, 0.06), 0 18px 44px rgba(16, 24, 40, 0.1);
-  --blur: saturate(180%) blur(22px);
+  --r-md: 16px;
+
+  --hairline: rgba(14, 18, 32, 0.07);
+  --blur: saturate(200%) blur(28px);
+
+  --glass-fill: rgba(255, 255, 255, 0.58);
+  --glass-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.95),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.25),
+    0 24px 60px -24px rgba(46, 84, 190, 0.32),
+    0 6px 18px -8px rgba(46, 84, 190, 0.18);
 }
 
 * {
@@ -48,127 +45,129 @@ body {
     system-ui, Roboto, sans-serif;
   color: var(--ink);
   line-height: 1.55;
-  font-size: 15px;
+  font-size: 16px;
   -webkit-font-smoothing: antialiased;
-  background-color: var(--bg);
-  /* sıvı arka plan: sabit, çok hafif renk buğusu — cam yüzeyler bunun üstünde yüzer */
+  /* Canlı sıvı fon: doygun renk blobları — cam bunların üstünde yüzer ve blur
+     görünür olur. Beyaza yakın merkez okunurluğu korur. */
+  background-color: #eef1fb;
   background-image:
-    radial-gradient(52rem 36rem at 12% -6%, rgba(96, 156, 255, 0.2), transparent 62%),
-    radial-gradient(44rem 30rem at 96% 4%, rgba(255, 158, 214, 0.14), transparent 60%),
-    radial-gradient(56rem 40rem at 50% 112%, rgba(94, 222, 187, 0.13), transparent 64%);
+    radial-gradient(46rem 34rem at 8% -8%, rgba(76, 138, 255, 0.42), transparent 58%),
+    radial-gradient(40rem 30rem at 100% 0%, rgba(168, 108, 255, 0.34), transparent 58%),
+    radial-gradient(36rem 28rem at 84% 82%, rgba(255, 108, 180, 0.26), transparent 60%),
+    radial-gradient(44rem 34rem at 0% 100%, rgba(56, 208, 224, 0.3), transparent 60%),
+    linear-gradient(180deg, #f4f6ff 0%, #eef1fb 100%);
   background-attachment: fixed;
   min-height: 100vh;
 }
 
 ::selection {
-  background: rgba(10, 124, 255, 0.22);
+  background: rgba(10, 124, 255, 0.25);
 }
 
 .shell {
-  max-width: 940px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 0 1.1rem 5rem;
+  padding: 0 1.15rem 6rem;
 }
 
-/* ---------- üst çubuk: yüzen buzlu-cam hap ---------- */
+/* ---------- üst çubuk: yüzen cam hap ---------- */
 .topbar {
   position: sticky;
-  top: 0.9rem;
+  top: 1rem;
   z-index: 50;
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  margin: 0.9rem 0 1.8rem;
-  padding: 0.55rem 0.9rem;
-  background: var(--glass);
+  gap: 0.3rem;
+  margin: 1rem 0 2rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--glass-fill);
   -webkit-backdrop-filter: var(--blur);
   backdrop-filter: var(--blur);
-  border: 1px solid var(--glass-edge);
-  outline: 1px solid var(--hairline);
-  outline-offset: -1px;
+  border: 1px solid rgba(255, 255, 255, 0.75);
   border-radius: 999px;
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--glass-shadow);
 }
 
 .topbar .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  font-size: 1.02rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
+  gap: 0.55rem;
+  font-size: 1.05rem;
+  font-weight: 750;
+  letter-spacing: -0.015em;
   color: var(--ink);
   text-decoration: none;
-  margin-right: 0.6rem;
-  padding: 0.25rem 0.55rem;
+  margin-right: 0.7rem;
+  padding: 0.3rem 0.55rem;
 }
 
 .topbar .brand::before {
   content: "";
-  width: 22px;
-  height: 22px;
-  border-radius: 7px;
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
   background:
-    radial-gradient(120% 120% at 20% 15%, rgba(255, 255, 255, 0.55), transparent 55%),
-    linear-gradient(135deg, #35a1ff 0%, #0a7cff 55%, #7a5cff 120%);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 2px 6px rgba(10, 124, 255, 0.35);
+    radial-gradient(120% 120% at 22% 15%, rgba(255, 255, 255, 0.6), transparent 55%),
+    linear-gradient(135deg, #41a6ff 0%, #0a7cff 52%, #8a5cff 115%);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.4),
+    0 4px 12px -2px rgba(10, 124, 255, 0.55);
 }
 
 .topbar a:not(.brand) {
-  color: var(--muted);
+  color: #3d4a5e;
   text-decoration: none;
-  font-size: 0.92rem;
-  font-weight: 500;
-  padding: 0.32rem 0.8rem;
+  font-size: 0.95rem;
+  font-weight: 550;
+  padding: 0.42rem 1rem;
   border-radius: 999px;
-  transition: background 0.16s ease, color 0.16s ease;
+  transition: background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .topbar a:not(.brand):hover {
-  color: var(--accent);
-  background: var(--info-tint);
+  color: var(--accent-deep);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 4px 12px -4px rgba(46, 84, 190, 0.35);
 }
 
 /* ---------- tipografi ---------- */
 h1 {
-  font-size: 1.55rem;
-  font-weight: 700;
-  letter-spacing: -0.022em;
-  margin: 0 0 1.1rem;
+  font-size: 1.85rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+  margin: 0 0 1.2rem;
 }
 
 h2 {
-  font-size: 1.02rem;
-  font-weight: 650;
-  letter-spacing: -0.012em;
-  margin: 0 0 0.7rem;
+  font-size: 1.16rem;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  margin: 0 0 0.8rem;
 }
 
 p {
-  margin: 0.4rem 0 0.8rem;
+  margin: 0.4rem 0 0.85rem;
 }
 
 /* ---------- cam kart ---------- */
 .card {
-  background: var(--glass);
+  background: var(--glass-fill);
   -webkit-backdrop-filter: var(--blur);
   backdrop-filter: var(--blur);
-  border: 1px solid var(--glass-edge);
-  outline: 1px solid var(--hairline);
-  outline-offset: -1px;
-  border-radius: var(--r-lg);
-  padding: 1.35rem 1.4rem;
-  margin-bottom: 1.15rem;
-  box-shadow: var(--shadow-card);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  border-radius: var(--r-xl);
+  padding: 1.6rem 1.7rem;
+  margin-bottom: 1.4rem;
+  box-shadow: var(--glass-shadow);
 }
 
 /* ---------- form ---------- */
 label {
   display: block;
-  font-size: 0.82rem;
-  font-weight: 550;
+  font-size: 0.84rem;
+  font-weight: 600;
   color: var(--muted);
-  margin: 0.65rem 0 0.25rem;
+  margin: 0.7rem 0 0.3rem;
 }
 
 input,
@@ -176,119 +175,132 @@ select,
 textarea {
   width: 100%;
   max-width: 26rem;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-sm);
-  font-size: 0.95rem;
+  padding: 0.66rem 0.95rem;
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  border-radius: var(--r-md);
+  font-size: 0.98rem;
   font-family: inherit;
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.78);
   color: var(--ink);
-  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+  box-shadow: inset 0 1px 2px rgba(14, 18, 32, 0.05), 0 1px 0 rgba(255, 255, 255, 0.6);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
 }
 
 input::placeholder,
 textarea::placeholder {
-  color: #9aa1ad;
+  color: #97a0b1;
 }
 
 input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: rgba(10, 124, 255, 0.65);
-  box-shadow: 0 0 0 4px rgba(10, 124, 255, 0.16);
+  background: rgba(255, 255, 255, 0.95);
+  border-color: rgba(10, 124, 255, 0.55);
+  box-shadow: 0 0 0 4px rgba(10, 124, 255, 0.18), inset 0 1px 2px rgba(14, 18, 32, 0.04);
 }
 
-/* ---------- düğmeler ---------- */
+/* ---------- düğmeler: hap, parlak, renkli gölgeli ---------- */
 button {
   margin-top: 0.9rem;
-  padding: 0.52rem 1.15rem;
+  padding: 0.66rem 1.5rem;
   border: none;
-  border-radius: var(--r-sm);
-  background: linear-gradient(180deg, #2f97ff, var(--accent) 78%);
+  border-radius: 999px;
+  background: linear-gradient(180deg, #47a4ff 0%, var(--accent) 55%, #0070ea 100%);
   color: #fff;
-  font-size: 0.93rem;
-  font-weight: 600;
+  font-size: 0.97rem;
+  font-weight: 650;
   font-family: inherit;
   letter-spacing: 0.002em;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 2px 8px rgba(10, 124, 255, 0.3);
-  transition: transform 0.12s ease, box-shadow 0.16s ease, background 0.16s ease, opacity 0.16s ease;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 1px rgba(0, 40, 120, 0.18),
+    0 10px 24px -8px rgba(10, 124, 255, 0.65);
+  transition: transform 0.13s ease, box-shadow 0.18s ease, filter 0.18s ease;
 }
 
 button:hover:not(:disabled) {
-  background: linear-gradient(180deg, #1f8bff, var(--accent-deep) 82%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 4px 14px rgba(10, 124, 255, 0.36);
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.5),
+    inset 0 -1px 1px rgba(0, 40, 120, 0.18),
+    0 14px 30px -8px rgba(10, 124, 255, 0.7);
 }
 
 button:active:not(:disabled) {
-  transform: scale(0.975);
+  transform: scale(0.965);
+  filter: brightness(0.98);
 }
 
 button:disabled {
-  background: #b7bdc9;
+  background: linear-gradient(180deg, #c3c9d6, #aeb6c6);
   box-shadow: none;
   cursor: not-allowed;
 }
 
 button.secondary {
-  background: rgba(255, 255, 255, 0.66);
+  background: rgba(255, 255, 255, 0.7);
   -webkit-backdrop-filter: var(--blur);
   backdrop-filter: var(--blur);
-  color: var(--accent);
-  border: 1px solid rgba(10, 124, 255, 0.35);
-  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
+  color: var(--accent-deep);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    0 6px 16px -8px rgba(46, 84, 190, 0.4);
 }
 
 button.secondary:hover:not(:disabled) {
-  background: var(--info-tint);
-  box-shadow: 0 2px 8px rgba(10, 124, 255, 0.14);
+  background: rgba(255, 255, 255, 0.92);
+  filter: none;
 }
 
 button.danger {
-  background: linear-gradient(180deg, #ff5147, var(--danger-strong) 80%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 2px 8px rgba(224, 40, 29, 0.3);
+  background: linear-gradient(180deg, #ff6257 0%, #f03e33 55%, #de2a1f 100%);
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.45),
+    inset 0 -1px 1px rgba(120, 10, 0, 0.2),
+    0 10px 24px -8px rgba(224, 40, 29, 0.6);
 }
 
 button.danger:hover:not(:disabled) {
-  background: linear-gradient(180deg, #f2453b, #c81f15 82%);
+  filter: brightness(1.05);
 }
 
-/* klavye odağı her kontrol için görünür (erişilebilirlik) */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
-/* ---------- tablo: iOS inset-grouped his ---------- */
+/* ---------- tablo: cam liste ---------- */
 .table-wrap {
   overflow-x: auto;
-  border-radius: var(--r-md);
-  border: 1px solid var(--hairline);
-  background: rgba(255, 255, 255, 0.45);
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.8);
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
 }
 
 th,
 td {
   text-align: left;
-  padding: 0.55rem 0.7rem;
+  padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--hairline);
   vertical-align: top;
 }
 
 th {
-  color: var(--muted);
-  font-weight: 600;
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: #66718a;
+  font-weight: 650;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 
@@ -301,33 +313,45 @@ tbody tr {
 }
 
 tbody tr:hover {
-  background: rgba(10, 124, 255, 0.045);
+  background: rgba(255, 255, 255, 0.55);
+}
+
+/* tablo hücresindeki düğmeler kompakt kalsın (ana CTA'lar .actions'ta tam boy) */
+td button {
+  padding: 0.42rem 1.05rem;
+  font-size: 0.88rem;
 }
 
 /* ---------- durum metinleri ---------- */
 .error {
   color: var(--danger);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
+  font-weight: 550;
   margin-top: 0.6rem;
 }
 
 .success {
   color: var(--ok);
-  font-size: 0.9rem;
+  font-size: 0.92rem;
+  font-weight: 550;
   margin-top: 0.6rem;
 }
 
 .muted {
   color: var(--muted);
-  font-size: 0.88rem;
+  font-size: 0.9rem;
 }
 
 /* ---------- sayılar ---------- */
 .balance {
-  font-size: 2.15rem;
-  font-weight: 700;
-  letter-spacing: -0.025em;
+  font-size: 2.5rem;
+  font-weight: 750;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
+  background: linear-gradient(120deg, #0e1220 20%, #0a7cff 90%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .mono {
@@ -335,33 +359,34 @@ tbody tr:hover {
   font-size: 0.86em;
 }
 
-/* ---------- rozetler: renk buğulu cam haplar ---------- */
+/* ---------- rozetler ---------- */
 .badge {
   display: inline-block;
-  padding: 0.14rem 0.6rem;
+  padding: 0.2rem 0.7rem;
   border-radius: 999px;
-  font-size: 0.76rem;
-  font-weight: 600;
+  font-size: 0.79rem;
+  font-weight: 650;
   letter-spacing: 0.01em;
   border: 1px solid transparent;
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.5);
 }
 
 .badge.ok {
   background: var(--ok-tint);
   color: var(--ok);
-  border-color: rgba(52, 199, 89, 0.25);
+  border-color: rgba(48, 209, 88, 0.3);
 }
 
 .badge.warn {
   background: var(--danger-tint);
   color: var(--danger);
-  border-color: rgba(255, 59, 48, 0.22);
+  border-color: rgba(255, 69, 58, 0.28);
 }
 
 .badge.info {
   background: var(--info-tint);
   color: var(--accent-deep);
-  border-color: rgba(10, 124, 255, 0.22);
+  border-color: rgba(10, 124, 255, 0.28);
 }
 
 /* ---------- yerleşim yardımcıları ---------- */
@@ -387,39 +412,43 @@ tbody tr:hover {
   margin-top: 0;
 }
 
-/* istatistik karoları (sağlık şeridi, cüzdan özeti) */
+/* istatistik karoları: renk yıkamalı cam */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.8rem;
 }
 
 .stat {
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid var(--hairline);
-  border-radius: var(--r-md);
-  padding: 0.75rem 0.9rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.45) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: var(--r-lg);
+  padding: 0.95rem 1.1rem;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    0 10px 24px -14px rgba(46, 84, 190, 0.35);
 }
 
 .stat .k {
-  font-size: 0.74rem;
-  font-weight: 600;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: 0.76rem;
+  font-weight: 650;
+  color: #66718a;
+  letter-spacing: 0.02em;
 }
 
 .stat .v {
-  font-size: 1.45rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 1.65rem;
+  font-weight: 750;
+  letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
-  margin-top: 0.1rem;
+  margin-top: 0.15rem;
 }
 
 .stat.alert {
-  background: var(--danger-tint);
-  border-color: rgba(255, 59, 48, 0.25);
+  background:
+    linear-gradient(135deg, rgba(255, 235, 233, 0.92) 0%, rgba(255, 226, 223, 0.55) 100%);
+  border-color: rgba(255, 120, 110, 0.5);
 }
 
 .stat.alert .v {
@@ -430,34 +459,36 @@ tbody tr:hover {
 .empty {
   text-align: center;
   color: var(--muted);
-  font-size: 0.9rem;
-  padding: 1.6rem 1rem;
-  border: 1px dashed var(--hairline);
-  border-radius: var(--r-md);
+  font-size: 0.92rem;
+  padding: 1.8rem 1rem;
+  border: 1.5px dashed rgba(92, 103, 127, 0.28);
+  border-radius: var(--r-lg);
   background: rgba(255, 255, 255, 0.35);
 }
 
-/* açılış (landing) kahramanı */
+/* açılış kahramanı */
 .hero {
   text-align: center;
-  padding: 3.2rem 1rem 2.6rem;
+  padding: 3.6rem 1rem 2.8rem;
 }
 
 .hero h1 {
-  font-size: 2.3rem;
-  letter-spacing: -0.032em;
-  margin-bottom: 0.6rem;
-  background: linear-gradient(120deg, #16181d 30%, #0a7cff 75%, #7a5cff 105%);
+  font-size: 2.7rem;
+  line-height: 1.14;
+  letter-spacing: -0.036em;
+  margin-bottom: 0.7rem;
+  background: linear-gradient(115deg, #0e1220 25%, #0a7cff 70%, #8a5cff 100%);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
 .hero p {
-  max-width: 34rem;
-  margin: 0 auto 1.3rem;
-  color: var(--muted);
-  font-size: 1.02rem;
+  max-width: 36rem;
+  margin: 0 auto 1.4rem;
+  color: #46506b;
+  font-size: 1.1rem;
+  line-height: 1.6;
 }
 
 /* ince kaydırma çubuğu */
@@ -467,7 +498,7 @@ tbody tr:hover {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(22, 24, 29, 0.18);
+  background: rgba(14, 18, 32, 0.2);
   border-radius: 999px;
   border: 3px solid transparent;
   background-clip: content-box;
@@ -477,7 +508,6 @@ tbody tr:hover {
   background: transparent;
 }
 
-/* hareket azaltma tercihi */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -491,23 +521,26 @@ tbody tr:hover {
   }
 }
 
-/* dar ekran */
 @media (max-width: 640px) {
   .shell {
-    padding: 0 0.8rem 4rem;
+    padding: 0 0.85rem 4.5rem;
   }
 
   .topbar {
-    top: 0.5rem;
+    top: 0.55rem;
     flex-wrap: wrap;
-    border-radius: var(--r-lg);
+    border-radius: var(--r-xl);
   }
 
   h1 {
-    font-size: 1.32rem;
+    font-size: 1.45rem;
   }
 
   .hero h1 {
-    font-size: 1.7rem;
+    font-size: 1.9rem;
+  }
+
+  .balance {
+    font-size: 2rem;
   }
 }

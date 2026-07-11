@@ -66,7 +66,8 @@ export default function HomePage() {
         </div>
       ) : null}
 
-      <div className="card">
+      {/* Login kartı dar ve ortalı: tam genişlik kart sağda ölü boşluk bırakıyordu. */}
+      <div className="card" style={{ maxWidth: "30rem", margin: "0 auto 1.4rem" }}>
         <h2>{mode === "signin" ? "Giriş yap" : "Hesap oluştur"}</h2>
         <form onSubmit={submit}>
           {mode === "signup" ? (
