@@ -30,9 +30,10 @@ export function buildJoinUrl(slotId: string, role: "teacher" | "class", endsAt: 
   return `${baseUrl()}/join/${token}`;
 }
 
+// en-US: panel eğitmen yüzüdür (native ESL arz — Türkçe anlamıyor).
 function formatInZone(at: Date, tz: string): string {
   try {
-    return new Intl.DateTimeFormat("tr-TR", {
+    return new Intl.DateTimeFormat("en-US", {
       dateStyle: "medium",
       timeStyle: "short",
       timeZone: tz,
@@ -49,7 +50,7 @@ export const teacherPortalRouter = router({
       if (!teacher) {
         throw new TRPCError({
           code: "NOT_FOUND",
-          message: "Panel bağlantısı geçersiz ya da iptal edilmiş.",
+          message: "This panel link is invalid or has been revoked.",
         });
       }
 

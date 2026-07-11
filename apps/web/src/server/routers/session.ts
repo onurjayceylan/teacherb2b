@@ -26,12 +26,17 @@ export function joinSecret(): string {
 }
 
 /** Token'ı doğrular ve beklenen rolü şart koşar; aksi halde NOT_FOUND. */
+// Hata metinleri role göre: eğitmen yüzü İngilizce (hedef arz native ESL),
+// sınıf yüzü iki dilli (okul projeksiyonuna açılıyor).
 function requireRole(token: string, role: "teacher" | "class"): { slotId: string } {
   const payload = verifyJoinToken(token, joinSecret());
   if (!payload || payload.role !== role) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Ders bağlantısı geçersiz ya da süresi dolmuş.",
+      message:
+        role === "teacher"
+          ? "This lesson link is invalid or has expired."
+          : "Ders bağlantısı geçersiz ya da süresi dolmuş. / This lesson link is invalid or has expired.",
     });
   }
   return { slotId: payload.slotId };
@@ -49,9 +54,10 @@ export function maskStudentName(fullName: string): string {
 }
 
 /** UTC anını verilen timezone'da okunur biçimler; geçersiz tz'de UTC'ye düşer. */
+// en-US: bu formatlar eğitmen yüzüne gider (native ESL arz — Türkçe anlamıyor).
 function formatInZone(at: Date, tz: string): string {
   try {
-    return new Intl.DateTimeFormat("tr-TR", {
+    return new Intl.DateTimeFormat("en-US", {
       dateStyle: "full",
       timeStyle: "short",
       timeZone: tz,
@@ -102,7 +108,10 @@ export const sessionRouter = router({
     return ctx.pool.withPlatform(async (db) => {
       const row = await loadSlotSession(db, slotId);
       if (!row || !row.teacher_name || !row.teacher_tz) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "Ders bulunamadı ya da onaylı atama yok." });
+        throw new TRPCError({
+          code: "NOT_FOUND",
+          message: "Lesson not found or it has no confirmed teacher assignment.",
+        });
       }
       const students = await db.query<{ id: string; full_name: string }>(
         `SELECT id, full_name FROM student
@@ -143,6 +152,8 @@ export const sessionRouter = router({
   }),
 
   // Dersi başlat: session'ı (yoksa) oluşturur + started durumuna geçirir. İdempotent.
+  // Modül hataları Türkçe üretir (backend alanı); eğitmen yüzü İngilizce olduğundan
+  // bilinen zaman-penceresi hataları burada çevrilir — bilinmeyenler olduğu gibi geçer.
   start: publicProcedure.input(z.object({ token: tokenSchema })).mutation(async ({ ctx, input }) => {
     const { slotId } = requireRole(input.token, "teacher");
     return ctx.pool.withPlatform(async (db) => {
@@ -152,10 +163,14 @@ export const sessionRouter = router({
         return { sessionId, alreadyStarted: res.alreadyStarted ?? false };
       } catch (err) {
         if (err instanceof TRPCError) throw err;
-        throw new TRPCError({
-          code: "BAD_REQUEST",
-          message: err instanceof Error ? err.message : String(err),
-        });
+        const raw = err instanceof Error ? err.message : String(err);
+        const early = /başlangıca (\d+) dk var/.exec(raw);
+        const message = early
+          ? `The lesson cannot be started yet — it starts in ${early[1]} minutes (you can start at most 15 minutes early).`
+          : raw.includes("ders penceresi geçti")
+            ? "The lesson window has passed — please contact support."
+            : raw;
+        throw new TRPCError({ code: "BAD_REQUEST", message });
       }
     });
   }),
@@ -176,7 +191,7 @@ export const sessionRouter = router({
       return ctx.pool.withPlatform(async (db) => {
         const row = await loadSlotSession(db, slotId);
         if (!row?.session_id) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Önce dersi başlatın." });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Please start the lesson first." });
         }
         // Aidiyet: gönderilen her öğrenci bu dersin sınıfında ve aktif olmalı.
         const ids = input.entries.map((e) => e.studentId);
@@ -186,7 +201,10 @@ export const sessionRouter = router({
           [ids, row.class_group_id],
         );
         if (owned.rowCount !== ids.length) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "listede bu sınıfa ait olmayan öğrenci var" });
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "The list contains a student who is not in this class.",
+          });
         }
         await markAttendance(db, row.session_id, input.entries);
         return { marked: input.entries.length };
@@ -195,6 +213,8 @@ export const sessionRouter = router({
 
   // Dersi bitir: dosaj hesaplanır (endSession) + para AYRI transaction'da settle edilir
   // (settleSession kendi withPlatform tx'ini açar — endSession commit'inden sonra çağrılır).
+  // Denetim P0: kısa/erken ders otomatik settle OLMAZ — settleSession reviewRequired
+  // döner, oturum admin onay kuyruğuna düşer; eğitmen yüzü bunu açıkça söyler.
   finish: publicProcedure
     .input(z.object({ token: tokenSchema }))
     .mutation(async ({ ctx, input }) => {
@@ -202,7 +222,7 @@ export const sessionRouter = router({
       const { sessionId, dosageMin } = await ctx.pool.withPlatform(async (db) => {
         const row = await loadSlotSession(db, slotId);
         if (!row?.session_id) {
-          throw new TRPCError({ code: "BAD_REQUEST", message: "Önce dersi başlatın." });
+          throw new TRPCError({ code: "BAD_REQUEST", message: "Please start the lesson first." });
         }
         if (row.session_status === "ended" || row.session_status === "settled") {
           // İdempotent bitirme: dosaj zaten donmuş — settle aşamasına düş.
@@ -219,8 +239,10 @@ export const sessionRouter = router({
         }
       });
       // Para hareketi: hold→charge + eğitmen alacağı. Kendi tx'i; idempotent.
-      await settleSession(ctx.pool, sessionId);
-      return { dosageMin, settled: true as const };
+      // reviewRequired=true ise para İŞLEMEDİ — admin onayı bekliyor.
+      const settleRes = await settleSession(ctx.pool, sessionId);
+      const reviewRequired = settleRes.reviewRequired === true;
+      return { dosageMin, settled: !reviewRequired, reviewRequired };
     }),
 
   // Sınıf katılım görünümü (class token): sınıf adı + ders başladı mı. PII yok.
@@ -231,7 +253,7 @@ export const sessionRouter = router({
       return ctx.pool.withPlatform(async (db) => {
         const row = await loadSlotSession(db, slotId);
         if (!row) {
-          throw new TRPCError({ code: "NOT_FOUND", message: "Ders bulunamadı." });
+          throw new TRPCError({ code: "NOT_FOUND", message: "Ders bulunamadı. / Lesson not found." });
         }
         return {
           className: row.class_name,

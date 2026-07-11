@@ -23,22 +23,35 @@ export interface InviteTeacherInput {
   invitedBy?: string;
 }
 
+/** PG unique_violation (23505) mu? Ham sürücü hatasını dışarı sızdırmamak için ayırt edilir. */
+function isUniqueViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && (err as { code?: unknown }).code === "23505";
+}
+
 /** Tekil davet: teacher 'invited' olarak açılır, 5 evrak kind'ı 'missing' seed edilir. */
 export async function inviteTeacher(db: Db, input: InviteTeacherInput): Promise<string> {
-  const res = await db.query<{ id: string }>(
-    `INSERT INTO teacher (full_name, email, phone, country, timezone, source, invited_by)
-     VALUES ($1, $2, $3, $4, COALESCE($5, 'Europe/Istanbul'), $6, $7)
-     RETURNING id`,
-    [
-      input.fullName,
-      input.email,
-      input.phone ?? null,
-      input.country ?? null,
-      input.timezone ?? null,
-      input.source,
-      input.invitedBy ?? null,
-    ],
-  );
+  let res;
+  try {
+    res = await db.query<{ id: string }>(
+      `INSERT INTO teacher (full_name, email, phone, country, timezone, source, invited_by)
+       VALUES ($1, $2, $3, $4, COALESCE($5, 'Europe/Istanbul'), $6, $7)
+       RETURNING id`,
+      [
+        input.fullName,
+        input.email,
+        input.phone ?? null,
+        input.country ?? null,
+        input.timezone ?? null,
+        input.source,
+        input.invitedBy ?? null,
+      ],
+    );
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      throw new Error(`bu e-posta ile kayıtlı eğitmen zaten var: ${input.email}`);
+    }
+    throw err;
+  }
   const row = res.rows[0];
   if (!row) throw new Error("inviteTeacher: teacher INSERT satır dönmedi");
   await seedMissingDocuments(db, [row.id]);
@@ -75,21 +88,31 @@ export async function importTeachers(
 ): Promise<ImportTeachersResult> {
   if (rows.length === 0) return { created: 0, skipped: 0 };
 
-  const res = await db.query<{ id: string }>(
-    `INSERT INTO teacher (full_name, email, country, source, dispatch_ready)
-     SELECT i.full_name, i.email, i.country, i.source, $5
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[])
-            AS i(full_name, email, country, source)
-     ON CONFLICT (email) DO NOTHING
-     RETURNING id`,
-    [
-      rows.map((r) => r.fullName),
-      rows.map((r) => r.email),
-      rows.map((r) => r.country ?? null),
-      rows.map((r) => r.source ?? "hrmasterz"),
-      opts?.dispatchReady ?? true,
-    ],
-  );
+  let res;
+  try {
+    res = await db.query<{ id: string }>(
+      `INSERT INTO teacher (full_name, email, country, source, dispatch_ready)
+       SELECT i.full_name, i.email, i.country, i.source, $5
+         FROM unnest($1::text[], $2::text[], $3::text[], $4::text[])
+              AS i(full_name, email, country, source)
+       ON CONFLICT (email) DO NOTHING
+       RETURNING id`,
+      [
+        rows.map((r) => r.fullName),
+        rows.map((r) => r.email),
+        rows.map((r) => r.country ?? null),
+        rows.map((r) => r.source ?? "hrmasterz"),
+        opts?.dispatchReady ?? true,
+      ],
+    );
+  } catch (err) {
+    // ON CONFLICT (email) mükerrerleri sessizce atlar; başka bir unique kısıtına
+    // takılırsa PG detayını sızdırmadan anlamlı mesaj döneriz.
+    if (isUniqueViolation(err)) {
+      throw new Error("bu e-posta ile kayıtlı eğitmen zaten var: import satırlarını kontrol edin");
+    }
+    throw err;
+  }
   const createdIds = res.rows.map((r) => r.id);
 
   if (createdIds.length > 0) {

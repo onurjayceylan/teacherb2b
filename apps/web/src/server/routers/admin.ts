@@ -5,8 +5,9 @@ import { TRPCError } from "@trpc/server";
 import { adminSettleBankTopup } from "@teachernow/billing";
 import { getSlotForUpdate, materializePlans, offerNext } from "@teachernow/dispatch";
 import { isPaymentsFrozen, setPaymentsFrozen } from "@teachernow/ledger";
-import { resolveDispute } from "@teachernow/sessions";
+import { resolveDispute, settleSession } from "@teachernow/sessions";
 import { platformProcedure, router } from "../trpc";
+import { baseUrl } from "./teacher-portal";
 
 // Panoda tam adres gösterilmez: 'a***@dom.com' (log değil API yanıtı — pii-linter kapsamı dışı).
 function maskEmail(email: string): string {
@@ -458,7 +459,173 @@ export const adminRouter = router({
         if (!next) {
           return { ok: false as const, reason: "uygun aday bulunamadı" };
         }
-        return { ok: true as const, teacherId: next.teacherId, token: next.token };
+        // Yeni teklifin son geçerliliği + eğitmen adı: panoda "linki ilet" kartı için.
+        const detail = await db.query<{ offer_expires_at: Date; full_name: string; email: string }>(
+          `SELECT a.offer_expires_at, t.full_name, t.email
+             FROM assignment a JOIN teacher t ON t.id = a.teacher_id
+            WHERE a.id = $1`,
+          [next.assignmentId],
+        );
+        const d = detail.rows[0];
+        if (!d) throw new Error("reissueOffer: yeni atama satırı okunamadı");
+        return {
+          ok: true as const,
+          teacherId: next.teacherId,
+          teacherName: d.full_name,
+          teacherEmail: d.email,
+          token: next.token,
+          // Tam URL burada kurulur: bugün teklif linkini eğitmene ulaştırmanın panel yolu.
+          url: `${baseUrl()}/egitmen/teklif/${next.token}`,
+          expiresAt: d.offer_expires_at,
+        };
+      });
+    }),
+
+  // ---- Bekleyen teklifler (denetim P0: teklif linki iletim UI'ının veri kaynağı) ----
+
+  // offered durumundaki atamalar: slot zamanı + okul/sınıf/havuz + eğitmen adı ve
+  // e-postası (MASKESİZ — platform admin linki eğitmene elle iletecek; bu bir API
+  // yanıtıdır, log değildir) + teklifin son geçerliliği.
+  listOpenOffers: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        assignment_id: string;
+        slot_id: string;
+        starts_at: Date;
+        ends_at: Date;
+        offer_expires_at: Date;
+        school_name: string;
+        class_name: string;
+        pool_name: string;
+        teacher_name: string;
+        teacher_email: string;
+      }>(
+        `SELECT a.id AS assignment_id, a.slot_id, s.starts_at, s.ends_at, a.offer_expires_at,
+                sch.name AS school_name, cg.name AS class_name, pl.name AS pool_name,
+                t.full_name AS teacher_name, t.email AS teacher_email
+           FROM assignment a
+           JOIN booking_slot s ON s.id = a.slot_id
+           JOIN school sch ON sch.id = s.school_id
+           JOIN class_group cg ON cg.id = s.class_group_id
+           JOIN pool pl ON pl.id = s.pool_id
+           JOIN teacher t ON t.id = a.teacher_id
+          WHERE a.status = 'offered'
+          ORDER BY s.starts_at`,
+      );
+      return res.rows.map((r) => ({
+        assignmentId: r.assignment_id,
+        slotId: r.slot_id,
+        startsAt: r.starts_at,
+        endsAt: r.ends_at,
+        expiresAt: r.offer_expires_at,
+        expired: r.offer_expires_at.getTime() <= Date.now(),
+        schoolName: r.school_name,
+        className: r.class_name,
+        poolName: r.pool_name,
+        teacherName: r.teacher_name,
+        teacherEmail: r.teacher_email,
+      }));
+    });
+  }),
+
+  // ---- Settle onay kuyruğu (denetim P0: kısa/erken ders insan onayına düşer) ----
+
+  // review_required=true oturumlar: bağlam (okul/sınıf/eğitmen), planlı saat,
+  // gerçekleşen start/end + dosaj ve settle'ın neden beklediği (review_reason).
+  listSettleReviews: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        id: string;
+        started_at: Date | null;
+        ended_at: Date | null;
+        dosage_min: number | null;
+        review_reason: string | null;
+        starts_at: Date;
+        ends_at: Date;
+        school_name: string;
+        class_name: string;
+        teacher_name: string;
+      }>(
+        `SELECT cs.id, cs.started_at, cs.ended_at, cs.dosage_min, cs.review_reason,
+                s.starts_at, s.ends_at,
+                sch.name AS school_name, cg.name AS class_name, t.full_name AS teacher_name
+           FROM class_session cs
+           JOIN booking_slot s ON s.id = cs.slot_id
+           JOIN school sch ON sch.id = cs.school_id
+           JOIN class_group cg ON cg.id = cs.class_group_id
+           JOIN teacher t ON t.id = cs.teacher_id
+          WHERE cs.review_required
+          ORDER BY cs.created_at`,
+      );
+      return res.rows.map((r) => ({
+        sessionId: r.id,
+        schoolName: r.school_name,
+        className: r.class_name,
+        teacherName: r.teacher_name,
+        plannedStartsAt: r.starts_at,
+        plannedEndsAt: r.ends_at,
+        startedAt: r.started_at,
+        endedAt: r.ended_at,
+        dosageMin: r.dosage_min,
+        reason: r.review_reason,
+      }));
+    });
+  }),
+
+  // Onay: settleSession force:true ile çağrılır — para işler (hold bölüşülür),
+  // review bayrağını settle akışı temizler.
+  approveSettle: platformProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const res = await settleSession(ctx.pool, input.sessionId, { force: true });
+        return { sessionId: input.sessionId, alreadySettled: res.alreadySettled };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }),
+
+  // Ret: PARA İŞLEMEZ — yalnız review bayrağı düşer + audit izi atılır. Oturum 'ended',
+  // slot 'scheduled' kalır; slot böylece hold-aging uyarısına düşer ve karar (iptal/iade
+  // /manuel düzeltme) o kuyrukta verilir.
+  rejectSettle: platformProcedure
+    .input(z.object({ sessionId: z.string().uuid(), note: z.string().trim().min(2).max(1000) }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.pool.withPlatform(async (db) => {
+        const res = await db.query<{ school_id: string; review_reason: string | null }>(
+          `UPDATE class_session
+              SET review_required = false, updated_at = now()
+            WHERE id = $1 AND review_required
+            RETURNING school_id, review_reason`,
+          [input.sessionId],
+        );
+        const row = res.rows[0];
+        if (!row) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "onay bekleyen oturum bulunamadı (zaten sonuçlanmış olabilir)",
+          });
+        }
+        await db.query(
+          `INSERT INTO audit_log (actor_kind, actor_id, school_id, action, entity_type, entity_id, after)
+           VALUES ('platform_admin', $1, $2, 'settle_rejected', 'class_session', $3, $4::jsonb)`,
+          [
+            ctx.actor.userId,
+            row.school_id,
+            input.sessionId,
+            JSON.stringify({
+              note: input.note,
+              review_reason: row.review_reason,
+              // Para bilinçli işlenmedi: slot 'scheduled' kaldığı için hold-aging
+              // uyarısına düşer; nihai karar orada verilir.
+              money_untouched: true,
+            }),
+          ],
+        );
+        return { sessionId: input.sessionId };
       });
     }),
 

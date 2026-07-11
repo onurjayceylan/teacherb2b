@@ -34,8 +34,13 @@ export interface CompleteInterviewInput {
 
 /**
  * Görüşmeyi 'done' + skorlarla kapatır ve karara göre eğitmeni ilerletir:
- * accept → interview→active (+ decidedPoolId verildiyse havuz üyeliği),
+ * accept → interview→active + dispatch_ready=true (görüşmeden geçen eğitmen teklif
+ *          alabilmeli — P0 bulgusu: bayrak açılmadığı için davetli eğitmen asla teklif
+ *          alamıyordu) (+ decidedPoolId verildiyse havuz üyeliği),
  * reject → teacher 'rejected', hold → yalnız kayıt.
+ * Durum-makinesi tuzağı: eğitmen hâlâ 'docs_pending' ise (görüşme yapılmış demek)
+ * önce 'interview'a ilerletilir — trigger whitelist'i docs_pending→interview→active'i
+ * destekler; doğrudan docs_pending→active geçersizdi.
  */
 export async function completeInterview(db: Db, input: CompleteInterviewInput): Promise<void> {
   const res = await db.query<{ teacher_id: string }>(
@@ -62,8 +67,24 @@ export async function completeInterview(db: Db, input: CompleteInterviewInput): 
   if (!row) throw new Error(`completeInterview: görüşme bulunamadı: ${input.interviewId}`);
 
   if (input.decision === "accept") {
+    const statusRes = await db.query<{ status: string }>(
+      "SELECT status FROM teacher WHERE id = $1 FOR UPDATE",
+      [row.teacher_id],
+    );
+    const current = statusRes.rows[0]?.status;
+    if (!current) {
+      throw new Error(`completeInterview: eğitmen bulunamadı: ${row.teacher_id}`);
+    }
+    if (current === "docs_pending") {
+      // Görüşme tamamlandıysa görüşme yapılmıştır: ara adımı biz atarız ki
+      // trigger'ın whitelist'i (docs_pending→interview→active) ihlal edilmesin.
+      await db.query(
+        `UPDATE teacher SET status = 'interview', updated_at = now() WHERE id = $1`,
+        [row.teacher_id],
+      );
+    }
     await db.query(
-      `UPDATE teacher SET status = 'active', updated_at = now() WHERE id = $1`,
+      `UPDATE teacher SET status = 'active', dispatch_ready = true, updated_at = now() WHERE id = $1`,
       [row.teacher_id],
     );
     if (input.decidedPoolId) {

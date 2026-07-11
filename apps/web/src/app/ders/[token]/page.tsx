@@ -3,6 +3,9 @@
 // Eğitmen ders odası (public, token'lı): token URL'de taşınır, tüm yetki sunucuda
 // (session.* uçları token'ı her istekte doğrular). Login yok.
 // Öğrenciler MASKELİ adla gelir ("Ad S."); okulun ödediği fiyat sunucudan hiç gelmez.
+// DİL: EĞİTMEN YÜZÜ İNGİLİZCE — hedef arz native ESL, Türkçe anlamıyor.
+// Denetim P0: kısa ders otomatik settle olmaz — finish yanıtındaki reviewRequired
+// eğitmene "payment is pending a quick review" mesajıyla gösterilir.
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { errorMessage, formatCents, trpc } from "../../../lib/trpc";
@@ -39,7 +42,9 @@ export default function DersPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [checks, setChecks] = useState<Record<string, boolean>>({});
-  const [finished, setFinished] = useState<{ dosageMin: number } | null>(null);
+  const [finished, setFinished] = useState<{ dosageMin: number; reviewRequired: boolean } | null>(
+    null,
+  );
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -88,31 +93,31 @@ export default function DersPage() {
           present: checks[s.studentId] ?? true,
         })),
       });
-    }, "Yoklama kaydedildi.");
+    }, "Attendance saved.");
   }
 
   function finishLesson() {
-    if (!window.confirm("Dersi bitirmek istediğinize emin misiniz? Süre kesinleşir ve ödemeniz işlenir.")) {
+    if (!window.confirm("Are you sure you want to finish the lesson? The duration will be finalized and your payment processed.")) {
       return;
     }
     void run(async () => {
       const res = await trpc.session.finish.mutate({ token });
-      setFinished({ dosageMin: res.dosageMin });
+      setFinished({ dosageMin: res.dosageMin, reviewRequired: res.reviewRequired === true });
     }, null);
   }
 
-  if (loading) return <main className="muted">Yükleniyor…</main>;
+  if (loading) return <main className="muted">Loading…</main>;
 
   if (!room) {
     return (
       <main>
-        <h1>Ders odası</h1>
+        <h1>Lesson room</h1>
         <div className="card">
           <p className="muted">
-            Bu ders bağlantısı kullanılamıyor: geçersiz, süresi dolmuş ya da ders ataması
-            değişmiş olabilir.
+            This lesson link cannot be used: it may be invalid, expired, or the lesson assignment
+            may have changed.
           </p>
-          {loadError ? <p className="muted">Ayrıntı: {loadError}</p> : null}
+          {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>
       </main>
     );
@@ -125,12 +130,12 @@ export default function DersPage() {
   return (
     <main>
       <h1>
-        {room.className} — ders odası
+        {room.className} — lesson room
       </h1>
       <p className="muted">
-        Merhaba {room.teacherName}. {room.startsAtLocal}{" "}
-        <span className="muted">({room.timezone} saatiyle)</span> · {room.durationMin} dk ·
-        ücretiniz <strong>{formatCents(room.teacherPayCents)}</strong>
+        Hi {room.teacherName}. {room.startsAtLocal}{" "}
+        <span className="muted">({room.timezone} time)</span> · {room.durationMin} min ·
+        your rate <strong>{formatCents(room.teacherPayCents)}</strong>
       </p>
 
       {actionError ? <p className="error">{actionError}</p> : null}
@@ -138,40 +143,49 @@ export default function DersPage() {
 
       {finished ? (
         <div className="card">
-          <p className="success">
-            Ders kaydedildi: {finished.dosageMin} dk. Ödemeniz hesabınıza işlendi.
-          </p>
+          {finished.reviewRequired ? (
+            <p className="success">
+              Lesson recorded: {finished.dosageMin} min. Because it was unusually short, payment
+              is pending a quick review by our team.
+            </p>
+          ) : (
+            <p className="success">
+              Lesson recorded: {finished.dosageMin} min. Your payment has been credited to your
+              balance.
+            </p>
+          )}
         </div>
       ) : null}
 
       {notStarted ? (
         <div className="card">
-          <h2>Ders henüz başlamadı</h2>
+          <h2>The lesson has not started yet</h2>
           <p className="muted">
-            Derse başladığınızda süre saymaya başlar; bitirdiğinizde ödemeniz otomatik işlenir.
+            The timer starts when you start the lesson; when you finish, your payment is processed
+            automatically.
           </p>
           <button
             disabled={busy}
             onClick={() =>
-              void run(() => trpc.session.start.mutate({ token }), "Ders başladı — kolay gelsin!")
+              void run(() => trpc.session.start.mutate({ token }), "Lesson started — have a great class!")
             }
           >
-            Dersi başlat
+            Start lesson
           </button>
         </div>
       ) : null}
 
       {started || done ? (
         <div className="card">
-          <h2>Yoklama</h2>
+          <h2>Attendance</h2>
           {room.roster.length === 0 ? (
-            <p className="muted">Bu sınıfta kayıtlı öğrenci yok.</p>
+            <p className="muted">There are no students enrolled in this class.</p>
           ) : done ? (
             <table>
               <thead>
                 <tr>
-                  <th>Öğrenci</th>
-                  <th>Durum</th>
+                  <th>Student</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -180,11 +194,11 @@ export default function DersPage() {
                     <td>{s.name}</td>
                     <td>
                       {s.present === null ? (
-                        <span className="muted">işaretlenmedi</span>
+                        <span className="muted">not marked</span>
                       ) : s.present ? (
-                        <span className="badge ok">geldi</span>
+                        <span className="badge ok">present</span>
                       ) : (
-                        <span className="badge warn">gelmedi</span>
+                        <span className="badge warn">absent</span>
                       )}
                     </td>
                   </tr>
@@ -193,7 +207,7 @@ export default function DersPage() {
             </table>
           ) : (
             <>
-              <p className="muted">Derse katılan öğrencileri işaretleyin.</p>
+              <p className="muted">Check the students who attended the lesson.</p>
               <ul style={{ listStyle: "none", padding: 0 }}>
                 {room.roster.map((s) => (
                   <li key={s.studentId} style={{ marginBottom: "0.35rem" }}>
@@ -208,14 +222,14 @@ export default function DersPage() {
                       />
                       {s.name}
                       {s.present !== null ? (
-                        <span className="muted"> (kayıtlı: {s.present ? "geldi" : "gelmedi"})</span>
+                        <span className="muted"> (saved: {s.present ? "present" : "absent"})</span>
                       ) : null}
                     </label>
                   </li>
                 ))}
               </ul>
               <button className="secondary" disabled={busy} onClick={saveAttendance}>
-                Yoklamayı kaydet
+                Save attendance
               </button>
             </>
           )}
@@ -224,22 +238,25 @@ export default function DersPage() {
 
       {started ? (
         <div className="card">
-          <h2>Dersi bitir</h2>
+          <h2>Finish lesson</h2>
           <p className="muted">
-            Bitirdiğinizde ders süresi (dosaj) kesinleşir ve ücretiniz hesabınıza işlenir.
+            When you finish, the lesson duration is finalized and your payment is credited to
+            your balance.
           </p>
           <button disabled={busy} onClick={finishLesson}>
-            Dersi bitir
+            Finish lesson
           </button>
         </div>
       ) : null}
 
       {done && !finished ? (
         <div className="card">
-          <h2>Ders tamamlandı</h2>
+          <h2>Lesson completed</h2>
           <p className="success">
-            Ders kaydedildi: {room.dosageMin ?? room.durationMin} dk.
-            {room.sessionStatus === "settled" ? " Ödemeniz hesabınıza işlendi." : ""}
+            Lesson recorded: {room.dosageMin ?? room.durationMin} min.
+            {room.sessionStatus === "settled"
+              ? " Your payment has been credited to your balance."
+              : " Payment is pending a quick review by our team."}
           </p>
         </div>
       ) : null}

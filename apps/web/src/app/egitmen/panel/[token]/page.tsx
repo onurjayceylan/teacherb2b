@@ -3,6 +3,7 @@
 // Eğitmen paneli (public, kalıcı imzalı link): kazanç bakiyesi + gelecek dersler
 // (kendi saat diliminde, katılım linkiyle) + son settle edilmiş dersler.
 // Token her istekte sunucuda doğrulanır; iptal edilirse sayfa anında kapanır.
+// DİL: EĞİTMEN YÜZÜ İNGİLİZCE — hedef arz native ESL, Türkçe anlamıyor.
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { errorMessage, formatCents, trpc } from "../../../../lib/trpc";
@@ -49,11 +50,11 @@ interface Panel {
 }
 
 const PAYOUT_STATUS_LABELS: Record<string, { label: string; ok: boolean }> = {
-  pending: { label: "hazırlanıyor", ok: false },
-  submitted: { label: "bankaya gönderildi", ok: false },
-  paid: { label: "ödendi", ok: true },
-  failed: { label: "başarısız", ok: false },
-  cancelled: { label: "iptal", ok: false },
+  pending: { label: "being prepared", ok: false },
+  submitted: { label: "sent to bank", ok: false },
+  paid: { label: "paid", ok: true },
+  failed: { label: "failed", ok: false },
+  cancelled: { label: "cancelled", ok: false },
 };
 
 export default function EgitmenPanelPage() {
@@ -81,18 +82,18 @@ export default function EgitmenPanelPage() {
     void load();
   }, [load]);
 
-  if (loading) return <main className="muted">Yükleniyor…</main>;
+  if (loading) return <main className="muted">Loading…</main>;
 
   if (!panel) {
     return (
       <main>
-        <h1>Eğitmen paneli</h1>
+        <h1>Teacher panel</h1>
         <div className="card">
           <p className="muted">
-            Bu panel bağlantısı kullanılamıyor: geçersiz ya da iptal edilmiş olabilir. Yeni
-            link için Teachernow ekibine ulaşın.
+            This panel link cannot be used: it may be invalid or revoked. Contact the Teachernow
+            team for a new link.
           </p>
-          {loadError ? <p className="muted">Ayrıntı: {loadError}</p> : null}
+          {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>
       </main>
     );
@@ -100,28 +101,31 @@ export default function EgitmenPanelPage() {
 
   return (
     <main>
-      <h1>Merhaba {panel.teacherName}</h1>
-      <p className="muted">Saatler {panel.timezone} dilimindedir.</p>
+      <h1>Hi {panel.teacherName}</h1>
+      <p className="muted">All times are shown in {panel.timezone}.</p>
 
       <div className="card">
-        <h2>Kazanç bakiyeniz</h2>
+        <h2>Your earnings balance</h2>
         <p className="balance">{formatCents(panel.payableCents)}</p>
-        <p className="muted">Tamamlanan derslerin ücretleri burada birikir.</p>
+        <p className="muted">Your per-lesson rate for each completed lesson accumulates here.</p>
+        <p className="muted">
+          Payouts run every 2 weeks via Wise, after your documents have been verified.
+        </p>
       </div>
 
       <div className="card">
-        <h2>Ödemelerim</h2>
+        <h2>My payouts</h2>
         {panel.payouts.length === 0 ? (
-          <p className="muted">Henüz ödeme kaydı yok — ödemeler dönemsel olarak hazırlanır.</p>
+          <p className="muted">No payouts yet — payouts run every 2 weeks.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table>
               <thead>
                 <tr>
-                  <th>Tutar</th>
-                  <th>Durum</th>
-                  <th>Tarih</th>
-                  <th>Wise referansı</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Wise reference</th>
                 </tr>
               </thead>
               <tbody>
@@ -146,24 +150,24 @@ export default function EgitmenPanelPage() {
           </div>
         )}
         <p className="muted">
-          Başarısız ödemelerde alacağınız korunur — bir sonraki ödeme dönemine devreder.
+          If a payout fails, your balance is protected — it carries over to the next payout run.
         </p>
       </div>
 
       <div className="card">
-        <h2>Yaklaşan dersleriniz</h2>
+        <h2>Your upcoming lessons</h2>
         {panel.upcoming.length === 0 ? (
-          <p className="muted">Planlanmış ders yok — yeni teklifler geldikçe burada görünür.</p>
+          <p className="muted">No scheduled lessons — new offers will appear here as they come in.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table>
               <thead>
                 <tr>
-                  <th>Tarih / saat</th>
-                  <th>Okul / sınıf</th>
-                  <th>Süre</th>
-                  <th>Ücret</th>
-                  <th>Katılım</th>
+                  <th>Date / time</th>
+                  <th>School / class</th>
+                  <th>Duration</th>
+                  <th>Rate</th>
+                  <th>Join</th>
                 </tr>
               </thead>
               <tbody>
@@ -173,10 +177,10 @@ export default function EgitmenPanelPage() {
                     <td>
                       {l.schoolName} — {l.className}
                     </td>
-                    <td>{l.durationMin} dk</td>
+                    <td>{l.durationMin} min</td>
                     <td>{formatCents(l.teacherPayCents)}</td>
                     <td>
-                      <a href={l.joinUrl}>Derse katıl →</a>
+                      <a href={l.joinUrl}>Join lesson →</a>
                     </td>
                   </tr>
                 ))}
@@ -187,18 +191,18 @@ export default function EgitmenPanelPage() {
       </div>
 
       <div className="card">
-        <h2>Son dersler (ödemesi işlendi)</h2>
+        <h2>Recent lessons (payment processed)</h2>
         {panel.settled.length === 0 ? (
-          <p className="muted">Henüz tamamlanmış ders yok.</p>
+          <p className="muted">No completed lessons yet.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table>
               <thead>
                 <tr>
-                  <th>Tarih</th>
-                  <th>Okul / sınıf</th>
-                  <th>Süre</th>
-                  <th>Kazanç</th>
+                  <th>Date</th>
+                  <th>School / class</th>
+                  <th>Duration</th>
+                  <th>Earned</th>
                 </tr>
               </thead>
               <tbody>
@@ -208,7 +212,7 @@ export default function EgitmenPanelPage() {
                     <td>
                       {l.schoolName} — {l.className}
                     </td>
-                    <td>{l.dosageMin} dk</td>
+                    <td>{l.dosageMin} min</td>
                     <td>{formatCents(l.earnedCents)}</td>
                   </tr>
                 ))}

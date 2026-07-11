@@ -54,13 +54,15 @@ test("tam zincir: hold → ensure → start → yoklama → end → settle + rep
   await topupSchool(tdb.pool, seed1.schoolId, 4_000); // tam 1 ders
 
   // Dispatch akışının bıraktığı durum: hold alınmış, atama confirmed.
+  const startsA = minutesFromNow(-120);
+  const endsA = minutesFromNow(-60);
   slotA = await createHeldSlot(tdb.pool, {
     seed: seed1,
     planId,
     poolId,
     occurrenceKey: "2026-02-02",
-    startsAt: minutesFromNow(-120),
-    endsAt: minutesFromNow(-60),
+    startsAt: startsA,
+    endsAt: endsA,
     teacherId: teacher1,
   });
   expect(await balance(tdb.pool, "school", seed1.schoolId, "school_cash")).toBe(0);
@@ -73,11 +75,15 @@ test("tam zincir: hold → ensure → start → yoklama → end → settle + rep
   const again = await tdb.pool.withPlatform((db) => ensureSessionForSlot(db, slotA));
   expect(again).toEqual({ sessionId: sessionA, created: false });
 
-  // start idempotent
-  expect(await tdb.pool.withPlatform((db) => startSession(db, sessionA))).toEqual({
+  // start idempotent — slot penceresi içinde (tam slot başlangıcında) başlatılır
+  expect(
+    await tdb.pool.withPlatform((db) => startSession(db, sessionA, { now: startsA })),
+  ).toEqual({
     alreadyStarted: false,
   });
-  expect(await tdb.pool.withPlatform((db) => startSession(db, sessionA))).toEqual({
+  expect(
+    await tdb.pool.withPlatform((db) => startSession(db, sessionA, { now: startsA })),
+  ).toEqual({
     alreadyStarted: true,
   });
 
@@ -104,15 +110,17 @@ test("tam zincir: hold → ensure → start → yoklama → end → settle + rep
   expect(attendance.rows.filter((r) => r.present).length).toBe(2);
   expect(attendance.rows.filter((r) => !r.present).length).toBe(1);
 
-  // end: 45 dakikalık dosaj (now enjekte edilir)
+  // end: 45 dakikalık dosaj (now enjekte edilir — start + 45 dk)
   const ended = await tdb.pool.withPlatform((db) =>
-    endSession(db, sessionA, { now: minutesFromNow(45) }),
+    endSession(db, sessionA, { now: new Date(startsA.getTime() + 45 * 60_000) }),
   );
   expect(ended.dosageMin).toBe(45);
 
   // settle: hold bölüşülür — school_cash'e DOKUNULMAZ
+  // (45 dk dosaj planlanan 60 dk'nın yarısından fazla → review guard'ına takılmaz)
   const settled = await settleSession(tdb.pool, sessionA);
   expect(settled.alreadySettled).toBe(false);
+  if (!settled.txnId) throw new Error("settle sonucu txnId bekleniyordu");
   settleTxnId = settled.txnId;
 
   expect(await balance(tdb.pool, "school", seed1.schoolId, "wallet_hold")).toBe(0); // slot öncesine döndü
@@ -236,12 +244,13 @@ test("hatalar: ended olmayan settle, settled olmayan dispute, atamasız/schedule
   const planId = await seedPlan(tdb.pool, seed2, poolId);
   await topupSchool(tdb.pool, seed2.schoolId, 4_000);
 
+  const startsB = minutesFromNow(-240);
   const slotB = await createHeldSlot(tdb.pool, {
     seed: seed2,
     planId,
     poolId,
     occurrenceKey: "2026-02-03",
-    startsAt: minutesFromNow(-240),
+    startsAt: startsB,
     endsAt: minutesFromNow(-180),
     teacherId: teacher2,
   });
@@ -251,7 +260,7 @@ test("hatalar: ended olmayan settle, settled olmayan dispute, atamasız/schedule
 
   // created durumunda settle → hata; started durumunda da → hata
   await expect(settleSession(tdb.pool, sessionB)).rejects.toThrow(/'ended'/);
-  await tdb.pool.withPlatform((db) => startSession(db, sessionB));
+  await tdb.pool.withPlatform((db) => startSession(db, sessionB, { now: startsB }));
   await expect(settleSession(tdb.pool, sessionB)).rejects.toThrow(/'ended'/);
 
   // settle edilmemiş oturuma dispute açılamaz

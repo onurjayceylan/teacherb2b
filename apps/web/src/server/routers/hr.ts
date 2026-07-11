@@ -1,6 +1,7 @@
 // Eğitmen/HR hattı (yalnız platform): pipeline, davet, toplu import, evrak durumu,
 // İK görüşmesi. İş kuralları @teachernow/hr modülünde — burada yalnız giriş doğrulama + yetki.
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import {
   advanceStatus,
   completeInterview,
@@ -144,6 +145,23 @@ export const hrRouter = router({
     .mutation(async ({ ctx, input }) => {
       await ctx.pool.withPlatform(async (db) => advanceStatus(db, input));
       return { teacherId: input.teacherId, status: input.to };
+    }),
+
+  // dispatch_ready anahtarı (denetim P0): görüşme kabulü artık otomatik açıyor;
+  // burası panodaki görünür/geri-alınabilir el anahtarı (rozet toggle'ı).
+  setDispatchReady: platformProcedure
+    .input(z.object({ teacherId: z.string().uuid(), ready: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      await ctx.pool.withPlatform(async (db) => {
+        const res = await db.query(
+          "UPDATE teacher SET dispatch_ready = $2, updated_at = now() WHERE id = $1",
+          [input.teacherId, input.ready],
+        );
+        if (res.rowCount !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "eğitmen bulunamadı" });
+        }
+      });
+      return { teacherId: input.teacherId, dispatchReady: input.ready };
     }),
 
   setDocument: platformProcedure

@@ -133,6 +133,15 @@ export async function runInvariantSentinel(pool: ActorPool): Promise<SentinelRes
       [JSON.stringify({ key: "payments_frozen", violations: critical })],
     );
 
+    // İnsan alarmı: kill-switch outbox'a 'platform_alert' düşürür. ALERT_EMAIL yoksa
+    // placeholder alıcıyla yine yazılır — dispatcher göndermese de admin listesinde görünür.
+    const alertRecipient = process.env.ALERT_EMAIL ?? "alerts@yerel";
+    await db.query(
+      `INSERT INTO notification_outbox (recipient_email, template, payload)
+       VALUES ($1, 'platform_alert', $2::jsonb)`,
+      [alertRecipient, JSON.stringify({ checks: critical.map((v) => v.checkName), detail: summary })],
+    );
+
     return { critical, warnings, violations: critical, engagedKillSwitch: true };
   });
 }

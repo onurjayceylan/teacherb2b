@@ -9,15 +9,42 @@
 import type { ActorPool } from "@teachernow/db";
 import { ensureAccount, postTxn } from "./ledger.js";
 
-export interface SettleSessionResult {
+/** Settled sonuç: para hareket etti (ya da replay'de aynı txn'e işaret edildi). */
+export interface SettleSessionSettled {
   alreadySettled: boolean;
   txnId: string;
+  reviewRequired?: false;
+  reason?: undefined;
 }
+
+/** İnsan-onay sonucu: PARA HAREKETİ YOK — ders review kuyruğuna düştü. */
+export interface SettleSessionReview {
+  alreadySettled?: false;
+  txnId?: undefined;
+  reviewRequired: true;
+  reason: string;
+}
+
+/** Geriye uyumlu union: {txnId} | {alreadySettled} | {reviewRequired, reason}. */
+export type SettleSessionResult = SettleSessionSettled | SettleSessionReview;
+
+export interface SettleSessionOptions {
+  /**
+   * Admin onayı: review guard'larını (erken start / kısa ders) atlayıp settle eder
+   * ve review_required bayrağını false'a çeker. Varsayılan false.
+   */
+  force?: boolean;
+}
+
+/** Erken başlatma guard eşiği: started_at < slot.starts_at - 15 dk → insan onayı. */
+const EARLY_START_GRACE_MS = 15 * 60_000;
 
 export async function settleSession(
   pool: ActorPool,
   sessionId: string,
+  opts: SettleSessionOptions = {},
 ): Promise<SettleSessionResult> {
+  const force = opts.force ?? false;
   return pool.withPlatform(async (db) => {
     const sessionRes = await db.query<{
       id: string;
@@ -26,8 +53,12 @@ export async function settleSession(
       teacher_id: string;
       status: string;
       settle_txn_id: string | null;
+      started_at: Date | null;
+      dosage_min: number | null;
+      review_required: boolean;
     }>(
-      `SELECT id, slot_id, school_id, teacher_id, status, settle_txn_id
+      `SELECT id, slot_id, school_id, teacher_id, status, settle_txn_id,
+              started_at, dosage_min, review_required
          FROM class_session WHERE id = $1 FOR UPDATE`,
       [sessionId],
     );
@@ -48,12 +79,14 @@ export async function settleSession(
       id: string;
       school_id: string;
       status: string;
+      starts_at: Date;
+      ends_at: Date;
       price_cents: string;
       teacher_pay_cents: string;
       hold_txn_id: string | null;
       hold_released_txn_id: string | null;
     }>(
-      `SELECT id, school_id, status, price_cents, teacher_pay_cents,
+      `SELECT id, school_id, status, starts_at, ends_at, price_cents, teacher_pay_cents,
               hold_txn_id, hold_released_txn_id
          FROM booking_slot WHERE id = $1 FOR UPDATE`,
       [session.slot_id],
@@ -65,6 +98,56 @@ export async function settleSession(
     }
     if (!slot.hold_txn_id || slot.hold_released_txn_id) {
       throw new Error(`settleSession: slotta tüketilecek hold yok (slot=${slot.id})`);
+    }
+
+    // İnsan-onay guard'ları (para-güven bulgusu): şüpheli ders OTOMATİK settle edilmez.
+    // (a) erken başlatma — startSession penceresi bunu artık engelliyor; guard eski/yarış
+    //     verileri için kalır. (b) kısa ders — dosaj planlanan sürenin yarısından az.
+    if (!force) {
+      const dosageMin = session.dosage_min ?? 0;
+      const plannedMin = Math.round(
+        (slot.ends_at.getTime() - slot.starts_at.getTime()) / 60_000,
+      );
+      const reasons: string[] = [];
+      if (
+        session.started_at &&
+        session.started_at.getTime() < slot.starts_at.getTime() - EARLY_START_GRACE_MS
+      ) {
+        reasons.push(
+          `erken başlatma: planlanan ${slot.starts_at.toISOString()} yerine ${session.started_at.toISOString()}`,
+        );
+      }
+      if (dosageMin < plannedMin * 0.5) {
+        reasons.push(`kısa ders: ${dosageMin} dk (planlanan ${plannedMin} dk)`);
+      }
+      if (reasons.length > 0) {
+        const reason = reasons.join(" / ");
+        await db.query(
+          `UPDATE class_session
+              SET review_required = true, review_reason = $2, updated_at = now()
+            WHERE id = $1`,
+          [sessionId, reason],
+        );
+        // Aynı oturum için tekrarlanan settle denemeleri audit'i şişirmesin.
+        if (!session.review_required) {
+          await db.query(
+            `INSERT INTO audit_log (actor_kind, school_id, action, entity_type, entity_id, after)
+             VALUES ('system', $1, 'settle_review_required', 'class_session', $2, $3::jsonb)`,
+            [
+              slot.school_id,
+              sessionId,
+              JSON.stringify({
+                reason,
+                dosage_min: dosageMin,
+                planned_min: plannedMin,
+                started_at: session.started_at,
+                slot_starts_at: slot.starts_at,
+              }),
+            ],
+          );
+        }
+        return { reviewRequired: true, reason };
+      }
     }
 
     const price = Number(slot.price_cents); // pg bigint → string
@@ -87,9 +170,11 @@ export async function settleSession(
       ].filter((e) => e.amountCents !== 0), // sıfır bacak ledger CHECK'ine takılır
     });
 
+    // force=true insan onayıdır: settle ile birlikte review bayrağı da kapanır
+    // (review_reason iz olarak kalır).
     await db.query(
       `UPDATE class_session
-          SET status = 'settled', settle_txn_id = $2, updated_at = now()
+          SET status = 'settled', settle_txn_id = $2, review_required = false, updated_at = now()
         WHERE id = $1`,
       [sessionId, txnId],
     );

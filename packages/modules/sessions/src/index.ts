@@ -23,7 +23,13 @@ export {
   type SessionEventRole,
   type StartSessionResult,
 } from "./lifecycle.js";
-export { settleSession, type SettleSessionResult } from "./settle.js";
+export {
+  settleSession,
+  type SettleSessionOptions,
+  type SettleSessionResult,
+  type SettleSessionReview,
+  type SettleSessionSettled,
+} from "./settle.js";
 export {
   openDispute,
   resolveDispute,

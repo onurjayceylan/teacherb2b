@@ -193,6 +193,8 @@ test("24 saat tekrar koruması: ikinci koşum warning'leri raporlar ama audit'e 
 });
 
 test("bakiye drift'i CRITICAL'dır: flag açılır, audit yazılır; post_ledger_txn artık patlar", async () => {
+  // Kill-switch alarmının alıcısını sabitle (ALERT_EMAIL yolu da böylece test edilir).
+  process.env.ALERT_EMAIL = "sentinel-alerts@test.example";
   // Cache'i kasten kaydır — rollere UPDATE grant'i yok, yalnız owner yapabilir.
   await tdb.pool.withOwner((db) =>
     db.query("UPDATE ledger_account SET balance_cents = 777 WHERE id = $1", [cash]),
@@ -216,6 +218,23 @@ test("bakiye drift'i CRITICAL'dır: flag açılır, audit yazılır; post_ledger
   expect(audit.rows.length).toBe(1);
   expect(audit.rows[0]?.actor_kind).toBe("system");
   expect(audit.rows[0]?.entity_type).toBe("system_flag");
+
+  // Kill-switch insan alarmı: outbox'a 'platform_alert' düştü (dispatcher göndermese
+  // de admin listesinde görünür).
+  const alerts = await tdb.pool.withPlatform((db) =>
+    db.query<{
+      recipient_email: string;
+      status: string;
+      payload: { checks: string[]; detail: string };
+    }>(
+      "SELECT recipient_email, status, payload FROM notification_outbox WHERE template = 'platform_alert'",
+    ),
+  );
+  expect(alerts.rows.length).toBe(1);
+  expect(alerts.rows[0]?.recipient_email).toBe("sentinel-alerts@test.example");
+  expect(alerts.rows[0]?.status).toBe("pending");
+  expect(alerts.rows[0]?.payload.checks).toContain("balance_cache_drift");
+  expect(alerts.rows[0]?.payload.detail).toContain("balance_cache_drift");
 
   await expect(
     tdb.pool.withPlatform((db) =>

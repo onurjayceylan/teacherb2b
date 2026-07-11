@@ -3,6 +3,7 @@
 // Public eğitmen onboarding'i: davet token'ı URL'de taşınır, tüm yetki sunucuda
 // (teacherOnboarding.* uçları token'ı her istekte doğrular). Login yok.
 // Akış: profil → sözleşme (clickwrap) → evrak beyanı; durumlar get'ten çizilir.
+// DİL: EĞİTMEN YÜZÜ İNGİLİZCE — hedef arz native ESL (Filipinler vb.), Türkçe anlamıyor.
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { errorMessage, trpc } from "../../../../lib/trpc";
@@ -28,37 +29,62 @@ interface OnboardingData {
 }
 
 const STEPS: { key: Step; label: string }[] = [
-  { key: "profile", label: "1. Profil" },
-  { key: "contract", label: "2. Sözleşme" },
-  { key: "documents", label: "3. Evrak beyanı" },
-  { key: "review", label: "4. İnceleme" },
+  { key: "profile", label: "1. Profile" },
+  { key: "contract", label: "2. Agreement" },
+  { key: "documents", label: "3. Documents" },
+  { key: "review", label: "4. Review" },
 ];
 
 const DECLARABLE_KINDS: { kind: Exclude<DocumentKind, "contract">; label: string; hint: string }[] = [
-  { kind: "id_verification", label: "Kimlik doğrulama", hint: "Kimlik belgenizi hazırladıysanız beyan edin." },
-  { kind: "country_clearance", label: "Ülke izni", hint: "Çalışma/öğretme izni belgeniz." },
-  { kind: "tax_form", label: "Vergi formu", hint: "Ülkenize uygun vergi formu." },
-  { kind: "payout_method", label: "Ödeme yöntemi", hint: "Ödeme alacağınız hesap bilgisi." },
+  { kind: "id_verification", label: "ID verification", hint: "Confirm that you have your government-issued ID ready." },
+  { kind: "country_clearance", label: "Background / police clearance", hint: "A clearance certificate valid in your country (e.g. NBI clearance)." },
+  { kind: "tax_form", label: "Tax form", hint: "The tax form applicable in your country." },
+  { kind: "payout_method", label: "Payout method", hint: "The account details where you want to receive payouts (e.g. Wise)." },
 ];
 
 const DOC_STATUS_LABELS: Record<DocumentStatus, string> = {
-  missing: "Eksik",
-  submitted: "İletildi",
-  verified: "Doğrulandı",
-  rejected: "Reddedildi",
-  expired: "Süresi geçti",
+  missing: "Missing",
+  submitted: "Submitted",
+  verified: "Verified",
+  rejected: "Rejected",
+  expired: "Expired",
 };
 
-const CONTRACT_PLACEHOLDER = `EĞİTMEN HİZMET SÖZLEŞMESİ (ÖZET — YER TUTUCU)
+// Yaygın eğitmen saat dilimleri — datalist önerisi (serbest IANA girişi de geçerli).
+const COMMON_TIMEZONES = [
+  "Asia/Manila",
+  "Europe/Istanbul",
+  "America/New_York",
+  "America/Chicago",
+  "America/Los_Angeles",
+  "Europe/London",
+  "Africa/Johannesburg",
+  "Africa/Lagos",
+  "Asia/Kolkata",
+  "Asia/Ho_Chi_Minh",
+  "Asia/Jakarta",
+  "Australia/Sydney",
+];
 
-1. Taraflar: Teachernow platformu ile aşağıda adı yazılı eğitmen.
-2. Konu: Eğitmen, platform üzerinden okullara çevrimiçi ders verir.
-3. Ödeme: Ders başına ücret, evrak seti tamamlanıp doğrulanmadan ödeme yapılmaz.
-4. Gizlilik: Öğrenci ve okul verileri üçüncü kişilerle paylaşılamaz.
-5. Fesih: Taraflar 14 gün önceden bildirimle sözleşmeyi sonlandırabilir.
+const CONTRACT_PLACEHOLDER = `TEACHER SERVICES AGREEMENT (SUMMARY — PILOT PLACEHOLDER)
 
-Bu metin pilot dönem yer tutucusudur; nihai sözleşme metni hukuk onayıyla güncellenecektir.
-Adınızı yazıp onaylayarak sözleşmeyi elektronik olarak kabul etmiş olursunuz.`;
+1. Parties: The Teachernow platform and the teacher named below.
+2. Scope: The teacher delivers online lessons to schools through the platform as an
+   independent contractor.
+3. Pay: You are paid per lesson. Your per-lesson rate is shown on every offer you
+   receive and in your teacher panel before you accept any lesson.
+4. Payouts: Payouts run every 2 weeks via Wise. Payouts start only after your
+   document set has been verified by our team.
+5. Cancellations: If a school cancels a lesson less than 24 hours before its start
+   time, you are paid 50% of your per-lesson rate for that lesson.
+6. No-shows: Missing a confirmed lesson without notice is recorded as a no-show.
+   Repeated no-shows may lead to suspension from the platform (3 strikes).
+7. Confidentiality: Student and school data must not be shared with third parties.
+8. Termination: Either party may end this agreement with 14 days written notice.
+
+This is a pilot-period agreement; the final version is subject to legal review and
+will replace this text. By typing your name and confirming below you accept this
+agreement electronically.`;
 
 function statusBadgeClass(status: DocumentStatus): string {
   return status === "submitted" || status === "verified" ? "badge ok" : "badge warn";
@@ -117,19 +143,19 @@ export default function EgitmenDavetPage() {
     }
   }
 
-  if (loading) return <main className="muted">Yükleniyor…</main>;
+  if (loading) return <main className="muted">Loading…</main>;
 
   if (!data) {
     return (
       <main>
-        <h1>Eğitmen daveti</h1>
+        <h1>Teacher invitation</h1>
         <div className="card">
-          <p className="error">Bu davet bağlantısı kullanılamıyor.</p>
+          <p className="error">This invitation link cannot be used.</p>
           <p className="muted">
-            Bağlantı geçersiz, süresi dolmuş ya da iptal edilmiş olabilir. Sizi davet eden
-            Teachernow yetkilisinden yeni bir bağlantı isteyebilirsiniz.
+            The link may be invalid, expired, or revoked. Please ask the Teachernow team member
+            who invited you for a new link.
           </p>
-          {loadError ? <p className="muted">Ayrıntı: {loadError}</p> : null}
+          {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>
       </main>
     );
@@ -141,10 +167,10 @@ export default function EgitmenDavetPage() {
 
   return (
     <main>
-      <h1>Hoş geldiniz, {data.fullName}</h1>
+      <h1>Welcome, {data.fullName}</h1>
       <p className="muted">
-        Teachernow eğitmen kaydınızı tamamlamak için aşağıdaki adımları izleyin. İlerlemeniz
-        kaydedilir; bu sayfaya aynı bağlantıyla geri dönebilirsiniz.
+        Follow the steps below to complete your Teachernow teacher registration. Your progress is
+        saved — you can return to this page anytime using the same link.
       </p>
 
       <div className="card">
@@ -156,7 +182,7 @@ export default function EgitmenDavetPage() {
               aria-current={s.key === data.step ? "step" : undefined}
             >
               {s.label}
-              {s.key === data.step ? " (şu an)" : ""}
+              {s.key === data.step ? " (current)" : ""}
             </span>
           ))}
         </div>
@@ -166,11 +192,11 @@ export default function EgitmenDavetPage() {
       {notice ? <p className="success">{notice}</p> : null}
 
       <div className="card">
-        <h2>1. Profil bilgileri</h2>
+        <h2>1. Profile details</h2>
         {data.step !== "profile" ? (
-          <p className="success">Profil adımı tamamlandı. Bilgilerinizi yine de güncelleyebilirsiniz.</p>
+          <p className="success">Profile step completed. You can still update your details.</p>
         ) : (
-          <p className="muted">Telefon, ülke ve saat dilimi bilgilerinizi doldurup kaydedin.</p>
+          <p className="muted">Fill in your phone number, country, and time zone, then save.</p>
         )}
         <form
           onSubmit={(e) => {
@@ -183,57 +209,63 @@ export default function EgitmenDavetPage() {
                   ...(country.trim().length === 2 ? { country: country.trim().toUpperCase() } : {}),
                   ...(timezone.trim() ? { timezone: timezone.trim() } : {}),
                 }),
-              "Profil kaydedildi",
+              "Profile saved",
             );
           }}
         >
           <div className="row">
             <div>
-              <label htmlFor="ob-phone">Telefon</label>
+              <label htmlFor="ob-phone">Phone (with country code)</label>
               <input
                 id="ob-phone"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
-                placeholder="+90 5xx xxx xx xx"
+                placeholder="+63 917 123 4567"
               />
             </div>
             <div>
-              <label htmlFor="ob-country">Ülke (2 harf, örn. TR)</label>
+              <label htmlFor="ob-country">Country (2-letter code, e.g. PH)</label>
               <input
                 id="ob-country"
                 maxLength={2}
                 value={country}
                 onChange={(e) => setCountry(e.target.value.toUpperCase())}
-                placeholder="TR"
+                placeholder="PH"
               />
             </div>
             <div>
-              <label htmlFor="ob-tz">Saat dilimi</label>
+              <label htmlFor="ob-tz">Time zone</label>
               <input
                 id="ob-tz"
+                list="ob-tz-options"
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}
-                placeholder="Europe/Istanbul"
+                placeholder="Asia/Manila"
               />
+              <datalist id="ob-tz-options">
+                {COMMON_TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz} />
+                ))}
+              </datalist>
             </div>
           </div>
           <button type="submit" disabled={busy}>
-            Profili kaydet
+            Save profile
           </button>
         </form>
       </div>
 
       <div className="card">
-        <h2>2. Sözleşme</h2>
+        <h2>2. Agreement</h2>
         {contractDone ? (
           <p className="success">
-            Sözleşme kabul edildi{" "}
+            Agreement accepted{" "}
             <span className={statusBadgeClass(contract.status)}>
               {DOC_STATUS_LABELS[contract.status]}
             </span>
           </p>
         ) : data.step === "profile" ? (
-          <p className="muted">Önce profil adımını tamamlayın.</p>
+          <p className="muted">Please complete the profile step first.</p>
         ) : (
           <>
             <pre
@@ -258,11 +290,11 @@ export default function EgitmenDavetPage() {
                       token,
                       typedName: typedName.trim(),
                     }),
-                  "Sözleşme kabul edildi",
+                  "Agreement accepted",
                 );
               }}
             >
-              <label htmlFor="ob-typed-name">Adımı yazarak kabul ediyorum</label>
+              <label htmlFor="ob-typed-name">I accept by typing my full name</label>
               <input
                 id="ob-typed-name"
                 value={typedName}
@@ -272,7 +304,7 @@ export default function EgitmenDavetPage() {
                 minLength={2}
               />
               <button type="submit" disabled={busy || typedName.trim().length < 2}>
-                Sözleşmeyi kabul et
+                Accept agreement
               </button>
             </form>
           </>
@@ -280,20 +312,21 @@ export default function EgitmenDavetPage() {
       </div>
 
       <div className="card">
-        <h2>3. Evrak beyanı</h2>
+        <h2>3. Document declarations</h2>
         <p className="muted">
-          Her evrak için &quot;yükledim / beyan ediyorum&quot; deyin; ekibimiz beyanınızı
-          inceleyip doğrular. Doğrulama tamamlanmadan ödeme açılmaz.
+          For each document, declare that you have it ready ("I have uploaded / I declare"). Our
+          team will review and verify your declarations. Payouts stay locked until verification
+          is complete.
         </p>
         {data.step === "profile" || (!contractDone && data.step === "contract") ? (
-          <p className="muted">Önce profil ve sözleşme adımlarını tamamlayın.</p>
+          <p className="muted">Please complete the profile and agreement steps first.</p>
         ) : null}
         <table>
           <thead>
             <tr>
-              <th>Evrak</th>
-              <th>Durum</th>
-              <th>Not (opsiyonel)</th>
+              <th>Document</th>
+              <th>Status</th>
+              <th>Note (optional)</th>
               <th></th>
             </tr>
           </thead>
@@ -315,10 +348,10 @@ export default function EgitmenDavetPage() {
                   </td>
                   <td>
                     <input
-                      aria-label={`${label} notu`}
+                      aria-label={`${label} note`}
                       value={docNotes[kind] ?? ""}
                       onChange={(e) => setDocNotes({ ...docNotes, [kind]: e.target.value })}
-                      placeholder="örn. belge referansı"
+                      placeholder="e.g. document reference"
                     />
                   </td>
                   <td>
@@ -335,11 +368,11 @@ export default function EgitmenDavetPage() {
                               kind,
                               ...(note ? { note } : {}),
                             }),
-                          `${label}: beyan alındı`,
+                          `${label}: declaration received`,
                         );
                       }}
                     >
-                      {declared ? "Tekrar beyan et" : "Yükledim / beyan ediyorum"}
+                      {declared ? "Declare again" : "I have it / I declare"}
                     </button>
                   </td>
                 </tr>
@@ -351,10 +384,10 @@ export default function EgitmenDavetPage() {
 
       {data.step === "review" ? (
         <div className="card">
-          <h2>4. İnceleme</h2>
+          <h2>4. Review</h2>
           <p className="success">
-            Tüm adımlar tamamlandı. Ekibimiz beyanlarınızı doğrulayacak ve görüşme için sizinle
-            iletişime geçecek. Bu sayfayı kapatabilirsiniz.
+            All steps completed. Our team will verify your declarations and contact you to
+            schedule an interview. You can close this page.
           </p>
         </div>
       ) : null}

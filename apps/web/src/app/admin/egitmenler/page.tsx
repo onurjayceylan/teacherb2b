@@ -341,11 +341,33 @@ export default function EgitmenlerPage() {
                       </td>
                       <td>{SOURCE_LABELS[t.source]}</td>
                       <td>
-                        {t.dispatchReady ? (
-                          <span className="badge ok">hazır</span>
-                        ) : (
-                          <span className="badge warn">kapalı</span>
-                        )}
+                        {/* Rozet tıklanabilir toggle: dispatch_ready anahtarı (denetim P0). */}
+                        <button
+                          type="button"
+                          className={`badge ${t.dispatchReady ? "ok" : "warn"}`}
+                          style={{ marginTop: 0, cursor: "pointer", border: "none" }}
+                          disabled={busy}
+                          aria-label={`${t.fullName} dispatch ${t.dispatchReady ? "kapat" : "aç"}`}
+                          title={
+                            t.dispatchReady
+                              ? "Tıkla: teklif akışından çıkar (dispatch kapat)"
+                              : "Tıkla: teklif akışına al (dispatch aç)"
+                          }
+                          onClick={() =>
+                            void run(
+                              () =>
+                                trpc.hr.setDispatchReady.mutate({
+                                  teacherId: t.id,
+                                  ready: !t.dispatchReady,
+                                }),
+                              !t.dispatchReady
+                                ? "Dispatch açıldı — eğitmen teklif akışına girer"
+                                : "Dispatch kapatıldı — eğitmen yeni teklif almaz",
+                            )
+                          }
+                        >
+                          {t.dispatchReady ? "hazır ✓" : "kapalı ✕"}
+                        </button>
                       </td>
                       <td>
                         {t.payoutReady ? (

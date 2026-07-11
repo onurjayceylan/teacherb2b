@@ -28,7 +28,7 @@ async function requireTeacherByToken(db: Db, token: string): Promise<InviteToken
   if (!teacher) {
     throw new TRPCError({
       code: "NOT_FOUND",
-      message: "Davet bulunamadı — bağlantı geçersiz, süresi dolmuş ya da iptal edilmiş olabilir.",
+      message: "Invite not found — the link may be invalid, expired, or revoked.",
     });
   }
   return teacher;

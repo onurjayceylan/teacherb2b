@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Sentetik prob — dış izlemeye (Checkly) taşınacak uçtan uca sağlık kontrolü.
 // Oturum GEREKTİRMEZ; BASE_URL env'ine karşı 4 hafif kontrol koşar:
-//   1. GET /api/healthz  → 200 + ok:true + db:"up"; paymentsFrozen=true ise EXIT 2 (para donuk alarmı)
+//   1. GET /api/healthz  → 200 + db:"up" + workersOk:true (worker_heartbeat tazeliği);
+//      paymentsFrozen=true ise EXIT 2 (para donuk alarmı); bayat/hiç koşmamış worker → FAIL
 //   2. GET /             → 200 (giriş sayfası ayakta)
 //   3. GET /okul         → 200 (uygulama kabuğu render ediyor)
 //   4. GET /api/trpc/me.get → oturumsuz UNAUTHORIZED bekleriz ("API ayakta" kanıtı); 5xx ise FAIL
@@ -42,14 +43,27 @@ await step("GET /api/healthz", async () => {
   const res = await get("/api/healthz");
   if (res.status !== 200) throw new Error(`HTTP ${res.status} (200 beklendi)`);
   const body = await res.json();
-  if (body.ok !== true || body.db !== "up") {
+  if (body.db !== "up") {
     throw new Error(`beklenmeyen gövde: ${JSON.stringify(body)}`);
   }
-  if (body.paymentsFrozen === true) {
-    paymentsFrozen = true;
-    return "ok:true db:up — DİKKAT paymentsFrozen:true (para donuk!)";
+  // paymentsFrozen bayrağını workersOk kontrolünden ÖNCE yakala: worker da bayatsa
+  // adım FAIL olur ama exit 2 (para donuk alarmı) yine önceliklidir.
+  if (body.paymentsFrozen === true) paymentsFrozen = true;
+  if (body.workersOk !== true) {
+    const stale = Object.entries(body.workers ?? {})
+      .filter(([, w]) => w?.stale)
+      .map(([job, w]) => `${job}=${w?.lastRunAt ?? "never"}`);
+    throw new Error(
+      `workersOk:false — bayat/hiç koşmamış worker: ${stale.join(", ") || "worker_heartbeat boş"}`,
+    );
   }
-  return "ok:true db:up paymentsFrozen:false";
+  if (body.paymentsFrozen === true) {
+    return "db:up workersOk:true — DİKKAT paymentsFrozen:true (para donuk!)";
+  }
+  if (body.ok !== true) {
+    throw new Error(`beklenmeyen gövde: ${JSON.stringify(body)}`);
+  }
+  return "ok:true db:up paymentsFrozen:false workersOk:true";
 });
 
 await step("GET /", async () => {

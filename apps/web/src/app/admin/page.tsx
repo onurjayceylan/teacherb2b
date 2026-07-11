@@ -94,6 +94,41 @@ interface NotificationsView {
   items: NotificationItem[];
 }
 
+interface OpenOffer {
+  assignmentId: string;
+  slotId: string;
+  startsAt: Date;
+  endsAt: Date;
+  expiresAt: Date;
+  expired: boolean;
+  schoolName: string;
+  className: string;
+  poolName: string;
+  teacherName: string;
+  teacherEmail: string; // maskesiz — admin linki eğitmene elle iletir
+}
+
+// reissueOffer yanıtından satır altında gösterilen link (ham token yalnız bu state'te yaşar).
+interface OfferLink {
+  url: string;
+  teacherName: string;
+  teacherEmail: string;
+  expiresAt: Date;
+}
+
+interface SettleReview {
+  sessionId: string;
+  schoolName: string;
+  className: string;
+  teacherName: string;
+  plannedStartsAt: Date;
+  plannedEndsAt: Date;
+  startedAt: Date | null;
+  endedAt: Date | null;
+  dosageMin: number | null;
+  reason: string | null;
+}
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingTopup[]>([]);
   const [accounts, setAccounts] = useState<AdminBankAccount[]>([]);
@@ -112,6 +147,9 @@ export default function AdminPage() {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [notifications, setNotifications] = useState<NotificationsView | null>(null);
   const [pendingNotifications, setPendingNotifications] = useState(0);
+  const [openOffers, setOpenOffers] = useState<OpenOffer[]>([]);
+  const [offerLinks, setOfferLinks] = useState<Record<string, OfferLink>>({});
+  const [settleReviews, setSettleReviews] = useState<SettleReview[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -127,6 +165,8 @@ export default function AdminPage() {
         disputesRes,
         notificationsRes,
         pendingNotifRes,
+        openOffersRes,
+        settleReviewsRes,
       ] = await Promise.all([
         trpc.admin.listPendingTopups.query(),
         trpc.admin.listBankAccounts.query(),
@@ -137,6 +177,8 @@ export default function AdminPage() {
         trpc.admin.listDisputes.query(),
         trpc.admin.listNotifications.query(),
         trpc.admin.pendingNotificationCount.query(),
+        trpc.admin.listOpenOffers.query(),
+        trpc.admin.listSettleReviews.query(),
       ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
@@ -147,6 +189,8 @@ export default function AdminPage() {
       setDisputes(disputesRes);
       setNotifications(notificationsRes);
       setPendingNotifications(pendingNotifRes.pending);
+      setOpenOffers(openOffersRes);
+      setSettleReviews(settleReviewsRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -206,6 +250,189 @@ export default function AdminPage() {
 
       {actionError ? <p className="error">{actionError}</p> : null}
       {notice ? <p className="success">{notice}</p> : null}
+
+      <div className="card">
+        <h2>Bekleyen teklifler</h2>
+        <p className="muted">
+          offered durumundaki atamalar. E-posta altyapısı devreye girene kadar teklif linki
+          eğitmene buradan iletilir: &quot;Linki üret / yenile&quot; mevcut teklifi geri çekip
+          YENİ token&apos;lı teklif açar (sıradaki uygun adaya — aynı eğitmen dahil) ve tam
+          URL&apos;yi gösterir.
+        </p>
+        {openOffers.length === 0 ? (
+          <p className="muted">Bekleyen teklif yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Ders saati</th>
+                  <th>Okul / sınıf / havuz</th>
+                  <th>Eğitmen</th>
+                  <th>Son geçerlilik</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {openOffers.map((o) => {
+                  const link = offerLinks[o.slotId];
+                  return (
+                  <tr key={o.assignmentId}>
+                    <td>{new Date(o.startsAt).toLocaleString("tr-TR")}</td>
+                    <td>
+                      {o.schoolName} — {o.className}
+                      <div className="muted" style={{ fontSize: "0.8rem" }}>
+                        {o.poolName}
+                      </div>
+                    </td>
+                    <td>
+                      {o.teacherName}
+                      <div className="mono" style={{ fontSize: "0.75rem" }}>
+                        {o.teacherEmail}
+                      </div>
+                    </td>
+                    <td>
+                      {new Date(o.expiresAt).toLocaleString("tr-TR")}{" "}
+                      {o.expired ? <span className="badge warn">süresi doldu</span> : null}
+                    </td>
+                    <td>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            const res = await trpc.admin.reissueOffer.mutate({ slotId: o.slotId });
+                            if (!res.ok) {
+                              setOfferLinks((prev) => {
+                                const next = { ...prev };
+                                delete next[o.slotId];
+                                return next;
+                              });
+                              throw new Error(`Teklif yenilenemedi: ${res.reason}`);
+                            }
+                            setOfferLinks((prev) => ({
+                              ...prev,
+                              [o.slotId]: {
+                                url: res.url,
+                                teacherName: res.teacherName,
+                                teacherEmail: res.teacherEmail,
+                                expiresAt: res.expiresAt,
+                              },
+                            }));
+                          }, "Teklif linki üretildi — linki kopyalayıp eğitmene iletin")
+                        }
+                      >
+                        Linki üret / yenile
+                      </button>
+                      {link ? (
+                        <div style={{ marginTop: "0.35rem", maxWidth: "22rem" }}>
+                          <div
+                            className="mono"
+                            style={{
+                              wordBreak: "break-all",
+                              userSelect: "all",
+                              fontSize: "0.75rem",
+                            }}
+                          >
+                            {link.url}
+                          </div>
+                          <div className="muted" style={{ fontSize: "0.75rem" }}>
+                            {link.teacherName} ({link.teacherEmail}) — son geçerlilik:{" "}
+                            {new Date(link.expiresAt).toLocaleString("tr-TR")}
+                          </div>
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Settle onayı bekleyenler</h2>
+        <p className="muted">
+          Kısa/erken biten dersler otomatik settle edilmez; karar burada verilir. Onay parayı
+          işler (hold bölüşülür). Ret PARA İŞLEMEZ: oturum &quot;ended&quot;, slot
+          &quot;scheduled&quot; kalır — slot hold-aging uyarısına düşer ve nihai karar (iptal /
+          iade / manuel düzeltme) o kuyrukta verilir.
+        </p>
+        {settleReviews.length === 0 ? (
+          <p className="muted">Onay bekleyen ders yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Okul / sınıf</th>
+                  <th>Eğitmen</th>
+                  <th>Planlı saat</th>
+                  <th>Gerçekleşen</th>
+                  <th>Süre</th>
+                  <th>Gerekçe</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {settleReviews.map((r) => (
+                  <tr key={r.sessionId}>
+                    <td>
+                      {r.schoolName} — {r.className}
+                    </td>
+                    <td>{r.teacherName}</td>
+                    <td>{new Date(r.plannedStartsAt).toLocaleString("tr-TR")}</td>
+                    <td>
+                      {r.startedAt ? new Date(r.startedAt).toLocaleTimeString("tr-TR") : "—"}
+                      {" → "}
+                      {r.endedAt ? new Date(r.endedAt).toLocaleTimeString("tr-TR") : "—"}
+                    </td>
+                    <td>{r.dosageMin !== null ? `${r.dosageMin} dk` : "—"}</td>
+                    <td style={{ maxWidth: "14rem" }} className="muted">
+                      {r.reason ?? "—"}
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "0.35rem" }}>
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              () => trpc.admin.approveSettle.mutate({ sessionId: r.sessionId }),
+                              "Settle onaylandı — eğitmen alacağı işlendi",
+                            )
+                          }
+                        >
+                          Onayla
+                        </button>
+                        <button
+                          className="secondary"
+                          style={{ marginTop: 0 }}
+                          disabled={busy}
+                          onClick={() => {
+                            const note = window.prompt(
+                              "Ret notu (para işlenmez; slot scheduled kaldığı için hold-aging uyarısına düşer — nihai karar orada):",
+                              "ders süresi doğrulanamadı — hold-aging kuyruğunda karar verilecek",
+                            );
+                            if (!note) return;
+                            void run(
+                              () =>
+                                trpc.admin.rejectSettle.mutate({ sessionId: r.sessionId, note }),
+                              "Settle reddedildi — para işlenmedi; slot hold-aging uyarısına düşecek",
+                            );
+                          }}
+                        >
+                          Reddet
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="card">
         <h2>Manuel ders kaydı (Wizard-of-Oz)</h2>

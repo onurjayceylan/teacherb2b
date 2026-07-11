@@ -76,13 +76,29 @@ export interface StartSessionResult {
   alreadyStarted: boolean;
 }
 
+/** Ders slot başlangıcından en fazla bu kadar ÖNCE başlatılabilir. */
+const START_EARLY_GRACE_MS = 15 * 60_000;
+/** Slot bitişinden bu kadar SONRA start artık kabul edilmez (destek devreye girer). */
+const START_LATE_LIMIT_MS = 2 * 60 * 60_000;
+
 /**
- * created→started + started_at=now() + check_in olayı.
+ * created→started + started_at + check_in olayı.
+ * Zaman penceresi (para-güven bulgusu): slot.starts_at - 15 dk'dan önce ya da
+ * slot.ends_at + 2 saatten sonra start REDDEDİLİR — settle guard'larının ilk savunma hattı.
  * İdempotent: zaten started ise no-op ({alreadyStarted:true}); ended/settled ise hata.
+ * `now` testler için enjekte edilebilir; verilmezse duvar saati.
  */
-export async function startSession(db: Db, sessionId: string): Promise<StartSessionResult> {
-  const res = await db.query<{ status: string }>(
-    "SELECT status FROM class_session WHERE id = $1 FOR UPDATE",
+export async function startSession(
+  db: Db,
+  sessionId: string,
+  opts: { now?: Date } = {},
+): Promise<StartSessionResult> {
+  const res = await db.query<{ status: string; starts_at: Date; ends_at: Date }>(
+    `SELECT cs.status, bs.starts_at, bs.ends_at
+       FROM class_session cs
+       JOIN booking_slot bs ON bs.id = cs.slot_id
+      WHERE cs.id = $1
+      FOR UPDATE OF cs`,
     [sessionId],
   );
   const row = res.rows[0];
@@ -92,9 +108,20 @@ export async function startSession(db: Db, sessionId: string): Promise<StartSess
     throw new Error(`startSession: yalnız 'created' oturum başlatılabilir (${row.status})`);
   }
 
+  const now = opts.now ?? new Date();
+  if (now.getTime() < row.starts_at.getTime() - START_EARLY_GRACE_MS) {
+    const minutesLeft = Math.ceil((row.starts_at.getTime() - now.getTime()) / 60_000);
+    throw new Error(
+      `startSession: ders henüz başlatılamaz — başlangıca ${minutesLeft} dk var (en erken 15 dk önce)`,
+    );
+  }
+  if (now.getTime() > row.ends_at.getTime() + START_LATE_LIMIT_MS) {
+    throw new Error("startSession: ders penceresi geçti — destek ile iletişime geçin");
+  }
+
   await db.query(
-    "UPDATE class_session SET status = 'started', started_at = now(), updated_at = now() WHERE id = $1",
-    [sessionId],
+    "UPDATE class_session SET status = 'started', started_at = $2, updated_at = now() WHERE id = $1",
+    [sessionId, now],
   );
   await recordEvent(db, { sessionId, kind: "check_in", role: "teacher" });
   return { alreadyStarted: false };

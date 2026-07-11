@@ -149,6 +149,17 @@ export function renderTemplate(
           `açılabilmesi için lütfen evraklarınızı tamamlayın.</p>`,
       };
     }
+    case "platform_alert": {
+      const checks = Array.isArray(payload["checks"]) ? payload["checks"] : [];
+      return {
+        subject: "PLATFORM ALARM — sentinel kill-switch devrede",
+        html:
+          `<p>Invariant sentinel CRITICAL ihlal buldu; <strong>payments_frozen</strong> devreye alındı.</p>` +
+          `<p>Kontroller: ${esc(checks.join(", "))}</p>` +
+          `<p>Detay: ${esc(payload["detail"])}</p>` +
+          `<p>Ödemeler insan müdahalesine kadar donuk kalır.</p>`,
+      };
+    }
     default:
       throw new Error(`renderTemplate: bilinmeyen şablon: ${template}`);
   }

@@ -17,10 +17,11 @@ function sha256Hex(value: string): string {
 }
 
 /** UTC anını verilen timezone'da okunur biçimler; geçersiz tz'de UTC'ye düşer. */
-function formatInZone(at: Date, tz: string): string {
+// en-US: teklif yüzü eğitmene gider (native ESL arz — Türkçe anlamıyor).
+function formatInZone(at: Date, tz: string, dateStyle: "full" | "medium" = "full"): string {
   try {
-    return new Intl.DateTimeFormat("tr-TR", {
-      dateStyle: "full",
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle,
       timeStyle: "short",
       timeZone: tz,
     }).format(at);
@@ -61,7 +62,7 @@ export const offerRouter = router({
         throw new TRPCError({
           code: "NOT_FOUND",
           message:
-            "Teklif bulunamadı — süresi dolmuş, geri çekilmiş ya da ders başka bir eğitmene atanmış olabilir.",
+            "Offer not found — it may have expired, been withdrawn, or the lesson may have been assigned to another teacher.",
         });
       }
       const durationMin = Math.round(
@@ -78,6 +79,9 @@ export const offerRouter = router({
         // Zaman EĞİTMENİN timezone'unda formatlanır (teklif e-postası/karta hazır metin).
         startsAtLocal: formatInZone(row.starts_at, row.teacher_tz),
         expiresAt: row.offer_expires_at,
+        // Son geçerlilik de EĞİTMENİN diliminde (denetim bulgusu: tarayıcı diliminde
+        // tr-TR basılıyordu — yanlış saat/dil). Dilim etiketini UI (timezone) basar.
+        expiresAtLocal: formatInZone(row.offer_expires_at, row.teacher_tz, "medium"),
         durationMin,
         // Eğitmenin ders başı ücreti — okul fiyatı (price_cents) BİLİNÇLİ olarak yok.
         teacherPayCents: Number(row.teacher_pay_cents),

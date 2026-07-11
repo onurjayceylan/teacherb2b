@@ -84,6 +84,8 @@ describe("site kanalı tam pipeline", () => {
 
     const teacher = await readTeacher(teacherId);
     expect(teacher.status).toBe("active");
+    // P0 bulgusu: davet yolu pipeline'ının sonunda eğitmen teklif ALABİLMELİ
+    expect(teacher.dispatch_ready).toBe(true);
     // Evrak seti hâlâ 'missing' → payout hard-gate kapalı kalmalı
     expect(teacher.payout_ready).toBe(false);
 
@@ -104,6 +106,72 @@ describe("site kanalı tam pipeline", () => {
 
     const pipeline = await tdb.pool.withPlatform((db) => listPipeline(db, { status: "active" }));
     expect(pipeline.some((t) => t.id === teacherId)).toBe(true);
+  });
+});
+
+describe("durum-makinesi tuzağı: docs_pending'te tamamlanan görüşme", () => {
+  it("docs_pending'ten completeInterview(accept) hata YERİNE başarılı: interview ara adımı atılır", async () => {
+    const teacherId = await tdb.pool.withPlatform((db) =>
+      inviteTeacher(db, {
+        fullName: "Docs Pending Candidate",
+        email: "docspending.accept@example.com",
+        source: "site",
+      }),
+    );
+    await tdb.pool.withPlatform(async (db) => {
+      await advanceStatus(db, { teacherId, to: "profile" });
+      await advanceStatus(db, { teacherId, to: "docs_pending" });
+      // 'interview'a İLERLETİLMEDEN görüşme planlanıp tamamlanıyor (eski 500 senaryosu)
+    });
+    const interviewId = await tdb.pool.withPlatform((db) =>
+      scheduleInterview(db, { teacherId, scheduledAt: "2026-07-17T11:00:00Z" }),
+    );
+    await tdb.pool.withPlatform((db) =>
+      completeInterview(db, {
+        interviewId,
+        experienceScore: 4,
+        energyScore: 4,
+        decision: "accept",
+        decidedPoolId: nativeEslPoolId,
+      }),
+    );
+
+    const teacher = await readTeacher(teacherId);
+    expect(teacher.status).toBe("active");
+    expect(teacher.dispatch_ready).toBe(true);
+    expect(teacher.payout_ready).toBe(false); // evrak hard-gate'i değişmez
+  });
+});
+
+describe("mükerrer davet", () => {
+  it("aynı email ile ikinci invite anlamlı mesajla reddedilir (PG detayı sızmaz)", async () => {
+    await tdb.pool.withPlatform((db) =>
+      inviteTeacher(db, {
+        fullName: "Original Teacher",
+        email: "dup.invite@example.com",
+        source: "site",
+      }),
+    );
+    await expect(
+      tdb.pool.withPlatform((db) =>
+        inviteTeacher(db, {
+          fullName: "Duplicate Teacher",
+          email: "dup.invite@example.com",
+          source: "ilan",
+        }),
+      ),
+    ).rejects.toThrow(/bu e-posta ile kayıtlı eğitmen zaten var: dup\.invite@example\.com/);
+
+    // citext: büyük/küçük harf farkı da aynı mükerrerliktir
+    await expect(
+      tdb.pool.withPlatform((db) =>
+        inviteTeacher(db, {
+          fullName: "Duplicate Upper",
+          email: "DUP.INVITE@example.com",
+          source: "site",
+        }),
+      ),
+    ).rejects.toThrow(/bu e-posta ile kayıtlı eğitmen zaten var/);
   });
 });
 

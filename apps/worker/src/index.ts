@@ -1,9 +1,11 @@
 // Worker girişi: pg-boss saatte bir invariant sentinel'i, günde bir HR hatırlatma
-// taramasını koşturur.
+// taramasını koşturur. HER job koşum sonunda worker_heartbeat'e damga basar
+// (P0 görünmezlik bulgusu) — healthz/prob tazeliği bu tablodan denetler.
 import PgBoss from "pg-boss";
 import { makePool } from "@teachernow/db";
 import { runBackfillSweep } from "./backfill-jobs.js";
 import { runDispatchMaterializer, runOfferTimeoutSweeper } from "./dispatch-jobs.js";
+import { recordHeartbeat } from "./heartbeat.js";
 import { runHrReminders } from "./hr-reminders.js";
 import { runLowBalanceCheck } from "./low-balance.js";
 import { defaultResendSender, sendPendingNotifications } from "./notification-dispatcher.js";
@@ -37,6 +39,11 @@ async function main(): Promise<void> {
         `sentinel: ${result.violations.length} ihlal bulundu, payments_frozen devreye alındı`,
       );
     }
+    await recordHeartbeat(pool, SENTINEL_QUEUE, {
+      critical: result.critical.length,
+      warnings: result.warnings.length,
+      engagedKillSwitch: result.engagedKillSwitch,
+    });
   });
 
   await boss.createQueue(HR_REMINDERS_QUEUE);
@@ -46,6 +53,7 @@ async function main(): Promise<void> {
     if (result.reminded > 0) {
       console.log(`hr-reminders: ${result.reminded} eğitmen için hatırlatma kaydı yazıldı`);
     }
+    await recordHeartbeat(pool, HR_REMINDERS_QUEUE, result);
   });
 
   // Gece 02:00'de plan materializasyonu: slot + hold + ilk eğitmen teklifi
@@ -56,6 +64,7 @@ async function main(): Promise<void> {
     console.log(
       `dispatch-materializer: created=${result.created} blocked=${result.blocked} skipped=${result.skipped}`,
     );
+    await recordHeartbeat(pool, DISPATCH_MATERIALIZER_QUEUE, result);
   });
 
   // 5 dakikada bir: süresi dolan teklifleri expire et, sıradaki adaya geç
@@ -68,6 +77,7 @@ async function main(): Promise<void> {
         `offer-timeout-sweeper: expired=${result.expired} reoffered=${result.reoffered}`,
       );
     }
+    await recordHeartbeat(pool, OFFER_TIMEOUT_QUEUE, result);
   });
 
   // 10 dakikada bir: eğitmensiz slotlara backfill (re-offer) + SLA eskalasyonu
@@ -80,6 +90,7 @@ async function main(): Promise<void> {
         `backfill-sweeper: offered=${result.offered} reoffered=${result.reoffered} escalated=${result.escalated}`,
       );
     }
+    await recordHeartbeat(pool, BACKFILL_SWEEPER_QUEUE, result);
   });
 
   // 15 dakikada bir: 1 saatten uzun 'submitted' bekleyen payout'lar için alarm
@@ -90,6 +101,7 @@ async function main(): Promise<void> {
     if (result.stuck.length > 0) {
       console.warn(`payout-reconciler: ${result.stuck.length} payout 'submitted'da takılı`);
     }
+    await recordHeartbeat(pool, PAYOUT_RECONCILER_QUEUE, { stuck: result.stuck.length });
   });
 
   // Her sabah 07:00'de: bakiyesi 7 günlük taahhüdün altındaki / bloke slotlu okullara uyarı
@@ -100,6 +112,7 @@ async function main(): Promise<void> {
     if (result.warned > 0) {
       console.log(`low-balance-check: ${result.warned} okul için düşük bakiye uyarısı yazıldı`);
     }
+    await recordHeartbeat(pool, LOW_BALANCE_QUEUE, result);
   });
 
   // 2 dakikada bir: outbox'taki pending e-postaları gönder (RESEND_API_KEY yoksa biriktirir)
@@ -116,6 +129,7 @@ async function main(): Promise<void> {
         `notification-dispatcher: sent=${result.sent} failed=${result.failed} expired=${result.expired}`,
       );
     }
+    await recordHeartbeat(pool, NOTIFICATION_DISPATCHER_QUEUE, result);
   });
 
   let stopping = false;
