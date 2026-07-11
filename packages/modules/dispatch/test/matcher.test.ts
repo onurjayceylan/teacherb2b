@@ -301,3 +301,120 @@ describe("teklif yaşam döngüsü", () => {
     });
   });
 });
+
+// G0 kapısı (0015): reşit-olmayan içeren okulda (school.minors, varsayılan TRUE) yalnız
+// kimlik+ülke-sabıka evrakları 'verified' eğitmen (teacher.safeguarding_ready) aday olur.
+describe("G0 safeguarding kapısı", () => {
+  it("minors okulda evraksız eğitmen aday değil; evraklar verified olunca trigger'la aday olur", async () => {
+    const poolId = await seedPool(tdb.pool, "g0_pool_1");
+    const day = futureDate(NY, 4);
+    const planId = await makePlan(poolId, day.weekday, day.dateISO);
+    const slot = await insertSlot({
+      poolId,
+      planId,
+      occurrenceKey: day.dateISO,
+      startsAt: nyInstant(day.dateISO, 10),
+    });
+
+    const teacherId = await seedTeacher(tdb.pool, {
+      email: "g0.nodocs@example.com",
+      timezone: NY,
+      poolId,
+      availability: allWeekAvailability(),
+      withoutSafeguardingDocs: true,
+    });
+
+    // Evrak yok → müsait ve dispatch_ready olmasına rağmen aday DEĞİL
+    expect(await tdb.pool.withPlatform((db) => findCandidates(db, slot))).toEqual([]);
+
+    // Yalnız kimlik verified → hâlâ aday değil (iki evrak birden şart)
+    await tdb.pool.withPlatform((db) =>
+      db.query(
+        `INSERT INTO teacher_document (teacher_id, kind, status)
+         VALUES ($1, 'id_verification', 'verified')`,
+        [teacherId],
+      ),
+    );
+    expect(await tdb.pool.withPlatform((db) => findCandidates(db, slot))).toEqual([]);
+
+    // Ülke sabıka da verified → trigger safeguarding_ready'yi açar, eğitmen aday
+    await tdb.pool.withPlatform((db) =>
+      db.query(
+        `INSERT INTO teacher_document (teacher_id, kind, status)
+         VALUES ($1, 'country_clearance', 'verified')`,
+        [teacherId],
+      ),
+    );
+    const flag = await tdb.pool.withPlatform((db) =>
+      db.query<{ safeguarding_ready: boolean }>(
+        "SELECT safeguarding_ready FROM teacher WHERE id = $1",
+        [teacherId],
+      ),
+    );
+    expect(flag.rows[0]!.safeguarding_ready).toBe(true);
+    const candidates = await tdb.pool.withPlatform((db) => findCandidates(db, slot));
+    expect(candidates.map((c) => c.teacherId)).toEqual([teacherId]);
+
+    // Evrak 'expired'a düşerse kapı geri kapanır (trigger UPDATE'te de koşar)
+    await tdb.pool.withPlatform((db) =>
+      db.query(
+        `UPDATE teacher_document SET status = 'expired'
+          WHERE teacher_id = $1 AND kind = 'country_clearance'`,
+        [teacherId],
+      ),
+    );
+    expect(await tdb.pool.withPlatform((db) => findCandidates(db, slot))).toEqual([]);
+  });
+
+  it("yalnız-yetişkin okulda (minors=false) evraksız eğitmen aday olabilir", async () => {
+    const adult = await seedSchool(tdb.pool, "G0 Yetişkin Okul");
+    await tdb.pool.withPlatform((db) =>
+      db.query("UPDATE school SET minors = false WHERE id = $1", [adult.schoolId]),
+    );
+    const poolId = await seedPool(tdb.pool, "g0_pool_2");
+    const day = futureDate(NY, 5);
+    const planId = await seedPlan(tdb.pool, {
+      schoolId: adult.schoolId,
+      classGroupId: adult.classGroupId,
+      poolId,
+      weekday: day.weekday,
+      startMinute: 600,
+      durationMin: 60,
+      schoolTz: NY,
+      priceCents: 10_000,
+      teacherPayCents: 6_000,
+      startDate: day.dateISO,
+      weeks: 1,
+    });
+    const startsAt = nyInstant(day.dateISO, 10);
+    const slot = await tdb.pool.withPlatform(async (db) => {
+      const res = await db.query<{ id: string }>(
+        `INSERT INTO booking_slot
+           (school_id, plan_id, class_group_id, pool_id, occurrence_key,
+            starts_at, ends_at, price_cents, teacher_pay_cents)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 10000, 6000)
+         RETURNING id`,
+        [
+          adult.schoolId,
+          planId,
+          adult.classGroupId,
+          poolId,
+          day.dateISO,
+          startsAt,
+          new Date(startsAt.getTime() + 60 * 60_000),
+        ],
+      );
+      return (await getSlot(db, res.rows[0]!.id))!;
+    });
+
+    const teacherId = await seedTeacher(tdb.pool, {
+      email: "g0.adult@example.com",
+      timezone: NY,
+      poolId,
+      availability: allWeekAvailability(),
+      withoutSafeguardingDocs: true,
+    });
+    const candidates = await tdb.pool.withPlatform((db) => findCandidates(db, slot));
+    expect(candidates.map((c) => c.teacherId)).toEqual([teacherId]);
+  });
+});

@@ -41,6 +41,12 @@ interface SchoolOption {
   name: string;
 }
 
+interface SchoolG0 {
+  id: string;
+  name: string;
+  minors: boolean;
+}
+
 interface TeacherOption {
   id: string;
   fullName: string;
@@ -175,6 +181,7 @@ export default function AdminPage() {
   const [offerLinks, setOfferLinks] = useState<Record<string, OfferLink>>({});
   const [settleReviews, setSettleReviews] = useState<SettleReview[]>([]);
   const [health, setHealth] = useState<HealthStrip | null>(null);
+  const [schoolsG0, setSchoolsG0] = useState<SchoolG0[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -193,6 +200,7 @@ export default function AdminPage() {
         openOffersRes,
         settleReviewsRes,
         healthRes,
+        schoolsG0Res,
       ] = await Promise.all([
         trpc.admin.listPendingTopups.query(),
         trpc.admin.listBankAccounts.query(),
@@ -206,6 +214,7 @@ export default function AdminPage() {
         trpc.admin.listOpenOffers.query(),
         trpc.admin.listSettleReviews.query(),
         trpc.admin.healthStrip.query(),
+        trpc.admin.listSchools.query(),
       ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
@@ -219,6 +228,7 @@ export default function AdminPage() {
       setOpenOffers(openOffersRes);
       setSettleReviews(settleReviewsRes);
       setHealth(healthRes);
+      setSchoolsG0(schoolsG0Res);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -336,6 +346,64 @@ export default function AdminPage() {
           </p>
         </div>
       ) : null}
+
+      <div className="card">
+        <h2>Okullar — G0 (reşit-olmayan) bayrağı</h2>
+        <p className="muted">
+          &quot;Reşit-olmayan içerir&quot; işaretli okulda yalnız kimlik + ülke sabıka belgeleri
+          doğrulanmış (G0 onaylı) eğitmenler teklif alır. Varsayılan İŞARETLİ — yalnız-yetişkin
+          okulu (örn. kurumsal dil sınıfı) buradan kapatın.
+        </p>
+        {schoolsG0.length === 0 ? (
+          <p className="muted">Kayıtlı okul yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Okul</th>
+                  <th>Reşit-olmayan içerir</th>
+                </tr>
+              </thead>
+              <tbody>
+                {schoolsG0.map((s) => (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className={`badge ${s.minors ? "ok" : "warn"}`}
+                        style={{ marginTop: 0, cursor: "pointer", border: "none" }}
+                        disabled={busy}
+                        aria-label={`${s.name} minors ${s.minors ? "kapat" : "aç"}`}
+                        title={
+                          s.minors
+                            ? "Tıkla: yalnız-yetişkin okul olarak işaretle (G0 kapısı kalkar)"
+                            : "Tıkla: reşit-olmayan içerir olarak işaretle (G0 kapısı devreye girer)"
+                        }
+                        onClick={() =>
+                          void run(
+                            () =>
+                              trpc.admin.setSchoolMinors.mutate({
+                                schoolId: s.id,
+                                minors: !s.minors,
+                              }),
+                            !s.minors
+                              ? "Okul reşit-olmayan içerir işaretlendi — G0 kapısı devrede"
+                              : "Okul yalnız-yetişkin işaretlendi — G0 kapısı bu okulda aranmaz",
+                          )
+                        }
+                      >
+                        {s.minors ? "evet — G0 devrede" : "hayır — yetişkin"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       <div className="card">
         <h2>Bekleyen teklifler</h2>

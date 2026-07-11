@@ -159,6 +159,8 @@ export interface PipelineTeacher {
   status: TeacherStatus;
   dispatchReady: boolean;
   payoutReady: boolean;
+  /** G0: kimlik+ülke-sabıka verified mi? minors okulda teklif alabilmenin şartı (0015). */
+  safeguardingReady: boolean;
   createdAt: Date;
 }
 
@@ -179,9 +181,11 @@ export async function listPipeline(
     status: TeacherStatus;
     dispatch_ready: boolean;
     payout_ready: boolean;
+    safeguarding_ready: boolean;
     created_at: Date;
   }>(
-    `SELECT id, full_name, email, source, status, dispatch_ready, payout_ready, created_at
+    `SELECT id, full_name, email, source, status, dispatch_ready, payout_ready,
+            safeguarding_ready, created_at
        FROM teacher
       WHERE $1::text IS NULL OR status = $1
       ORDER BY created_at, id`,
@@ -195,6 +199,7 @@ export async function listPipeline(
     status: r.status,
     dispatchReady: r.dispatch_ready,
     payoutReady: r.payout_ready,
+    safeguardingReady: r.safeguarding_ready,
     createdAt: r.created_at,
   }));
 }

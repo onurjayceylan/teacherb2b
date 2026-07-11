@@ -1,7 +1,7 @@
 # Pilot Açılış Runbook'u — MEV Koleji · Era Koleji · Dream Big Language Schools
 
 Kural (03-mvp-kapsam): pilot **concierge** yürür ama HER TIKLAMAYI OKUL YAPAR — kurucu yönlendirir, dokunmaz. Takılan her adım ürün açığıdır; not al (funnel kayıtları /admin/metrikler'de).
-**G0 hatırlatması:** MEV/Era reşit-olmayan öğrenci içerir — yazılı safeguarding politikası + eğitmen ülke sabıka belgeleri 'verified' olmadan reşit-olmayan içeren İLK ders yapılmaz.
+**G0 hatırlatması:** MEV/Era reşit-olmayan öğrenci içerir — yazılı safeguarding politikası + eğitmen ülke sabıka belgeleri 'verified' olmadan reşit-olmayan içeren İLK ders yapılmaz. **Artık kod da zorluyor (0015):** okul varsayılan "reşit-olmayan içerir" işaretli; kimlik+ülke-sabıka evrağı 'verified' olmayan eğitmen bu okullarda teklif ALMAZ (eğitmen listesinde "G0" rozeti). Yalnız-yetişkin okulu /admin'deki okul kartından kapatabilirsin.
 
 ## Hafta 0 — platform hazırlığı (kurucu)
 - [ ] Deploy tamam (docs/deploy.md) + `pnpm probe` yeşil + admin atanmış + banka hesapları girili

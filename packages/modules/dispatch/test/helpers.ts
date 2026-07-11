@@ -58,9 +58,14 @@ export interface SeedTeacherInput {
   timezone: string;
   poolId?: string;
   availability?: AvailabilityWindow[];
+  /** G0 senaryoları için: true = kimlik+ülke-sabıka evrakları YOK (safeguarding_ready=false). */
+  withoutSafeguardingDocs?: boolean;
 }
 
-/** Aktif + dispatch_ready eğitmen; istenirse havuz üyeliği ve müsaitlik pencereleri. */
+/** Aktif + dispatch_ready eğitmen; istenirse havuz üyeliği ve müsaitlik pencereleri.
+ * Varsayılan olarak kimlik+ülke-sabıka evrakları 'verified' tohumlanır (0015 trigger'ı
+ * safeguarding_ready'yi türetir) — okullar varsayılan minors=true olduğundan G0 kapısı
+ * bunlarsız hiçbir adaya teklif açtırmaz. */
 export async function seedTeacher(pool: ActorPool, input: SeedTeacherInput): Promise<string> {
   return pool.withPlatform(async (db) => {
     const res = await db.query<{ id: string }>(
@@ -70,6 +75,13 @@ export async function seedTeacher(pool: ActorPool, input: SeedTeacherInput): Pro
       [input.email, input.timezone],
     );
     const teacherId = res.rows[0]!.id;
+    if (!input.withoutSafeguardingDocs) {
+      await db.query(
+        `INSERT INTO teacher_document (teacher_id, kind, status)
+         VALUES ($1, 'id_verification', 'verified'), ($1, 'country_clearance', 'verified')`,
+        [teacherId],
+      );
+    }
     if (input.poolId) {
       await db.query("INSERT INTO teacher_pool (teacher_id, pool_id) VALUES ($1, $2)", [
         teacherId,

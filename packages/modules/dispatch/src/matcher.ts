@@ -32,6 +32,8 @@ interface AvailabilityRow {
  * aktif + dispatch_ready + havuz üyesi + strike<3 + çakışan canlı atama yok +
  * müsaitlik penceresi slotu EĞİTMENİN kendi timezone'unda TAM kapsıyor.
  * Aynı slotu daha önce reddetmiş/düşürmüş/süresi dolmuş eğitmen tekrar aday olmaz.
+ * G0: okul reşit-olmayan içeriyorsa (school.minors) yalnız kimlik+ülke-sabıka
+ * belgeleri doğrulanmış eğitmen (teacher.safeguarding_ready) aday olur.
  */
 export async function findCandidates(db: Db, slot: SlotRow): Promise<Candidate[]> {
   const teachers = await db.query<{
@@ -44,9 +46,12 @@ export async function findCandidates(db: Db, slot: SlotRow): Promise<Candidate[]
               WHERE ca.teacher_id = t.id AND ca.status = 'confirmed') AS confirmed_count
        FROM teacher t
        JOIN teacher_pool tp ON tp.teacher_id = t.id AND tp.pool_id = $1 AND tp.active
+       JOIN school s ON s.id = $5
       WHERE t.status = 'active'
         AND t.dispatch_ready
         AND t.strike_count < 3
+        -- G0 kapısı: reşit-olmayan içeren okulda safeguarding evrakları şart
+        AND (NOT s.minors OR t.safeguarding_ready)
         -- çakışan canlı atama (offered/confirmed) olan eğitmen aday değil
         AND NOT EXISTS (
           SELECT 1 FROM assignment a
@@ -61,7 +66,7 @@ export async function findCandidates(db: Db, slot: SlotRow): Promise<Candidate[]
              AND p.status IN ('declined', 'dropped', 'expired')
         )
       ORDER BY confirmed_count ASC, t.created_at ASC`,
-    [slot.pool_id, slot.starts_at, slot.ends_at, slot.id],
+    [slot.pool_id, slot.starts_at, slot.ends_at, slot.id, slot.school_id],
   );
   if (teachers.rows.length === 0) return [];
 

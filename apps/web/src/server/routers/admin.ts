@@ -624,6 +624,45 @@ export const adminRouter = router({
       });
     }),
 
+  // ---- G0 kapısı (0015): okul minors bayrağı yönetimi ----
+
+  // Okulun reşit-olmayan içerip içermediği dispatch uygunluğunu belirler: minors=true
+  // okulda yalnız safeguarding_ready (kimlik+ülke-sabıka verified) eğitmen teklif alır.
+  // Varsayılan TRUE (güvenli taraf); yalnız-yetişkin okul buradan kapatılır.
+  listSchools: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{ id: string; name: string; minors: boolean; created_at: Date }>(
+        "SELECT id, name, minors, created_at FROM school ORDER BY created_at",
+      );
+      return res.rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        minors: r.minors,
+        createdAt: r.created_at,
+      }));
+    });
+  }),
+
+  setSchoolMinors: platformProcedure
+    .input(z.object({ schoolId: z.string().uuid(), minors: z.boolean() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.pool.withPlatform(async (db) => {
+        const res = await db.query(
+          "UPDATE school SET minors = $2, updated_at = now() WHERE id = $1",
+          [input.schoolId, input.minors],
+        );
+        if (res.rowCount !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "okul bulunamadı" });
+        }
+        await db.query(
+          `INSERT INTO audit_log (actor_kind, actor_id, school_id, action, entity_type, entity_id, after)
+           VALUES ('platform_admin', $1, $2, 'school_minors_set', 'school', $2, $3::jsonb)`,
+          [ctx.actor.userId, input.schoolId, JSON.stringify({ minors: input.minors })],
+        );
+        return { schoolId: input.schoolId, minors: input.minors };
+      });
+    }),
+
   // ---- Bekleyen teklifler (denetim P0: teklif linki iletim UI'ının veri kaynağı) ----
 
   // offered durumundaki atamalar: slot zamanı + okul/sınıf/havuz + eğitmen adı ve

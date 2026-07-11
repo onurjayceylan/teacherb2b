@@ -5,6 +5,8 @@
 > **DURUM (2026-07-11, denetim sonrası):** P0–P2 bulgularının TAMAMI üç turda kapatıldı ve CI'da yeşil:
 > **Tur A (P0)** `e681456` · **Tur B (P1)** `77cd51c` · **Tur C (P2)** `2f70436`.
 > Test: 108 → 158 yeşil. Aşağıda her kalemin yanında ✅ + tur işareti; kısmi kapananlarda kalan borç açıkça yazılı. P3 fikirleri bilinçli olarak backlog'da (bir kısmı Tur C ile kendiliğinden kapandı: müsaitlik self-servisi, reçete çoğaltma).
+>
+> **Denetim-sonrası ek bulgu (kapatıldı):** G0 kapısı yalnız runbook disipliniyle korunuyordu — matcher evrak durumuna bakmıyordu; görüşme-kabul düzeltmesi (Tur A) eğitmeni evraklar doğrulanmadan dispatchable yapabiliyordu. **0015 ile koda taşındı:** `school.minors` (varsayılan TRUE) + türetilmiş `teacher.safeguarding_ready` (kimlik+ülke-sabıka verified); minors okulda safeguarding'siz eğitmen teklif ALMAZ. Admin'de okul bayrağı kartı + eğitmen listesinde G0 rozeti.
 
 ## HÜKÜM
 Para çekirdeği (ledger, hold, idempotency, payout hard-gate, kiracı izolasyonu, saat dilimi matematiği) üç denetçinin ortak kanaatiyle SAĞLAM ve vaadi taşıyacak kalitede. Ama sistem bugün pilota açılsa ilk hafta 5 yerde duvara çarpar. "Full otomatize" iddiası para/dispatch çekirdeğinde doğru; İLETİŞİM katmanında (kim kime neyi bildiriyor) ve self-servis yüzeylerinde değil.

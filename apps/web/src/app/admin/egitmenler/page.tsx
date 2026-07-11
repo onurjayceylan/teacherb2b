@@ -31,6 +31,7 @@ interface PipelineTeacher {
   status: TeacherStatus;
   dispatchReady: boolean;
   payoutReady: boolean;
+  safeguardingReady: boolean;
   createdAt: Date;
 }
 
@@ -319,6 +320,7 @@ export default function EgitmenlerPage() {
                   <th>Durum</th>
                   <th>Kaynak</th>
                   <th>Dispatch</th>
+                  <th>G0</th>
                   <th>Payout</th>
                   <th>Durum ilerlet</th>
                   <th>Evrak güncelle</th>
@@ -368,6 +370,20 @@ export default function EgitmenlerPage() {
                         >
                           {t.dispatchReady ? "hazır ✓" : "kapalı ✕"}
                         </button>
+                      </td>
+                      <td>
+                        {/* G0 (0015): kimlik+ülke-sabıka verified mi? Salt-okur — evrak
+                            doğrulamayla türetilir; minors okulda teklif alabilmenin şartı. */}
+                        <span
+                          className={`badge ${t.safeguardingReady ? "ok" : "warn"}`}
+                          title={
+                            t.safeguardingReady
+                              ? "Kimlik + ülke sabıka doğrulandı — reşit-olmayan içeren okullarda ders verebilir"
+                              : "Kimlik + ülke sabıka doğrulanmadı — reşit-olmayan içeren okullarda teklif ALMAZ (evrakları 'verified' yapın)"
+                          }
+                        >
+                          {t.safeguardingReady ? "onaylı ✓" : "evrak ✕"}
+                        </span>
                       </td>
                       <td>
                         {t.payoutReady ? (
