@@ -67,6 +67,21 @@ function when(iso: unknown, tz: unknown): string {
   }
 }
 
+/** Eğitmen-yüzlü şablonlar İngilizce: aynı biçim, en-US locale (Türkçe karakter sızmaz). */
+function whenEn(iso: unknown, tz: unknown): string {
+  const at = new Date(String(iso ?? ""));
+  if (Number.isNaN(at.getTime())) return String(iso ?? "");
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: typeof tz === "string" && tz ? tz : "UTC",
+    }).format(at);
+  } catch {
+    return at.toISOString();
+  }
+}
+
 export interface RenderedEmail {
   subject: string;
   html: string;
@@ -149,8 +164,74 @@ export function renderTemplate(
           `açılabilmesi için lütfen evraklarınızı tamamlayın.</p>`,
       };
     }
+    // Eğitmen-yüzlü şablonlar İNGİLİZCE (Tur A kararı) — okul-yüzlüler Türkçe kalır.
+    case "teacher_slot_cancelled": {
+      const at = whenEn(payload["slotStartsAt"], payload["teacherTimezone"]);
+      return {
+        subject: `Lesson cancelled — ${at}`,
+        html:
+          `<p>Hello,</p>` +
+          `<p>Your lesson on <strong>${esc(at)}</strong>` +
+          (payload["schoolName"] ? ` with ${esc(payload["schoolName"])}` : "") +
+          ` has been cancelled by the school.</p>` +
+          (payload["lateCancel"]
+            ? `<p>Because this was a late cancellation, you are paid 50% of your lesson fee for this slot.</p>`
+            : "") +
+          `<p>No action is needed on your side.</p>`,
+      };
+    }
+    case "teacher_interview_scheduled": {
+      const at = whenEn(payload["scheduledAt"], payload["teacherTimezone"]);
+      const meetingUrl = typeof payload["meetingUrl"] === "string" ? payload["meetingUrl"] : "";
+      return {
+        subject: `Your Teachernow interview is scheduled — ${at}`,
+        html:
+          `<p>Hello,</p>` +
+          `<p>Your Teachernow interview is scheduled for <strong>${esc(at)}</strong>.</p>` +
+          (meetingUrl ? `<p><a href="${esc(meetingUrl)}">Join the interview</a></p>` : "") +
+          `<p>Please be on time - good luck!</p>`,
+      };
+    }
+    case "school_dispute_resolved": {
+      const at = when(payload["slotStartsAt"], "Europe/Istanbul");
+      const refunded = payload["outcome"] === "refunded";
+      return {
+        subject: `Ders itirazınız sonuçlandı — ${esc(payload["schoolName"])}`,
+        html:
+          `<p>Merhaba,</p>` +
+          `<p><strong>${esc(at)}</strong> dersi için açtığınız itiraz sonuçlandı.</p>` +
+          (refunded
+            ? `<p>Sonuç: itirazınız kabul edildi — ders ücreti` +
+              (payload["refundedCents"] ? ` (${esc(usd(payload["refundedCents"]))})` : "") +
+              ` bakiyenize iade edildi.</p>`
+            : `<p>Sonuç: itirazınız reddedildi — kayıtlar dersin verildiğini doğruladı; ` +
+              `ödeme geçerli kalır.</p>`) +
+          `<p>Sorularınız için bize ulaşabilirsiniz.</p>`,
+      };
+    }
+    case "school_topup_settled": {
+      return {
+        subject: `Bakiye yüklemeniz onaylandı — ${esc(usd(payload["amountCents"]))}`,
+        html:
+          `<p>Merhaba,</p>` +
+          `<p>Banka havaleniz` +
+          (payload["referenceCode"] ? ` (referans: <strong>${esc(payload["referenceCode"])}</strong>)` : "") +
+          ` onaylandı; ${esc(usd(payload["amountCents"]))} okul bakiyenize eklendi.</p>` +
+          `<p>Güncel bakiyenizi panelinizden görebilirsiniz.</p>`,
+      };
+    }
     case "platform_alert": {
       const checks = Array.isArray(payload["checks"]) ? payload["checks"] : [];
+      if (payload["kind"] === "chargeback") {
+        // Kart itirazı alarmı (0014): para OTOMATİK düzeltilmez — reversal admin'den atılır.
+        return {
+          subject: "PLATFORM ALARM — kart itirazı (chargeback)",
+          html:
+            `<p>Stripe kart itirazı bildirimi: <strong>${esc(checks.join(", "))}</strong></p>` +
+            `<p>Detay: ${esc(payload["detail"])}</p>` +
+            `<p>Para düzeltmesi otomatik yapılmaz — gerekiyorsa reversal admin panelinden atılır.</p>`,
+        };
+      }
       return {
         subject: "PLATFORM ALARM — sentinel kill-switch devrede",
         html:

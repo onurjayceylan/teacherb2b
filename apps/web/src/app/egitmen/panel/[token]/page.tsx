@@ -40,14 +40,28 @@ interface TeacherPayout {
   externalRef: string | null;
 }
 
+type PayoutMethod = "wise_email" | "iban";
+
+interface MaskedPayout {
+  method: PayoutMethod;
+  maskedValue: string;
+  accountHolder: string;
+}
+
 interface Panel {
   teacherName: string;
   timezone: string;
   payableCents: number;
+  payoutDetails: MaskedPayout | null;
   upcoming: UpcomingLesson[];
   settled: SettledLesson[];
   payouts: TeacherPayout[];
 }
+
+const PAYOUT_METHOD_LABELS: Record<PayoutMethod, string> = {
+  wise_email: "Wise e-mail",
+  iban: "IBAN",
+};
 
 const PAYOUT_STATUS_LABELS: Record<string, { label: string; ok: boolean }> = {
   pending: { label: "being prepared", ok: false },
@@ -64,6 +78,13 @@ export default function EgitmenPanelPage() {
   const [panel, setPanel] = useState<Panel | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [showPayoutForm, setShowPayoutForm] = useState(false);
+  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("wise_email");
+  const [payoutValue, setPayoutValue] = useState("");
+  const [payoutHolder, setPayoutHolder] = useState("");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -99,10 +120,39 @@ export default function EgitmenPanelPage() {
     );
   }
 
+  async function savePayoutDetails(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setActionError(null);
+    setNotice(null);
+    try {
+      await trpc.teacherPortal.updatePayoutDetails.mutate({
+        token,
+        details: {
+          method: payoutMethod,
+          value: payoutValue.trim(),
+          accountHolder: payoutHolder.trim(),
+        },
+      });
+      setNotice("Payout details saved.");
+      setPayoutValue("");
+      setPayoutHolder("");
+      setShowPayoutForm(false);
+      await load();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <main>
       <h1>Hi {panel.teacherName}</h1>
       <p className="muted">All times are shown in {panel.timezone}.</p>
+
+      {actionError ? <p className="error">{actionError}</p> : null}
+      {notice ? <p className="success">{notice}</p> : null}
 
       <div className="card">
         <h2>Your earnings balance</h2>
@@ -111,6 +161,77 @@ export default function EgitmenPanelPage() {
         <p className="muted">
           Payouts run every 2 weeks via Wise, after your documents have been verified.
         </p>
+      </div>
+
+      <div className="card">
+        <h2>Payout details</h2>
+        {panel.payoutDetails ? (
+          <p>
+            {PAYOUT_METHOD_LABELS[panel.payoutDetails.method]}{" "}
+            <span className="mono">{panel.payoutDetails.maskedValue}</span> — account holder{" "}
+            {panel.payoutDetails.accountHolder}
+          </p>
+        ) : (
+          <p className="error">Add your payout details to receive payments.</p>
+        )}
+        {showPayoutForm ? (
+          <form onSubmit={savePayoutDetails}>
+            <div className="row">
+              <div>
+                <label htmlFor="pp-method">Method</label>
+                <select
+                  id="pp-method"
+                  value={payoutMethod}
+                  onChange={(e) => setPayoutMethod(e.target.value as PayoutMethod)}
+                >
+                  <option value="wise_email">Wise e-mail</option>
+                  <option value="iban">IBAN</option>
+                </select>
+              </div>
+              <div>
+                <label htmlFor="pp-value">
+                  {payoutMethod === "wise_email" ? "Wise account e-mail" : "IBAN"}
+                </label>
+                <input
+                  id="pp-value"
+                  value={payoutValue}
+                  onChange={(e) => setPayoutValue(e.target.value)}
+                  placeholder={payoutMethod === "wise_email" ? "you@example.com" : "TR00 0000 ..."}
+                  required
+                  minLength={5}
+                />
+              </div>
+              <div>
+                <label htmlFor="pp-holder">Account holder (full legal name)</label>
+                <input
+                  id="pp-holder"
+                  value={payoutHolder}
+                  onChange={(e) => setPayoutHolder(e.target.value)}
+                  placeholder={panel.teacherName}
+                  required
+                  minLength={2}
+                />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="submit" disabled={busy}>
+                Save payout details
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => setShowPayoutForm(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        ) : (
+          <button className="secondary" onClick={() => setShowPayoutForm(true)}>
+            {panel.payoutDetails ? "Update payout details" : "Add payout details"}
+          </button>
+        )}
       </div>
 
       <div className="card">

@@ -44,6 +44,55 @@ export interface ResolveDisputeInput {
   note: string;
 }
 
+/**
+ * Karar okulun owner/admin kullanıcılarına 'school_dispute_resolved' outbox kaydı olarak
+ * AYNI transaction'da düşer (dispatch'in school_sla_escalated alıcı deseni). Boundary:
+ * sessions dispatch'i import edemez — outbox INSERT'i burada yereldir. outcome sözlüğü:
+ * 'released' = itiraz reddedildi (ödeme eğitmende kalır), 'refunded' = ücret iade edildi.
+ */
+async function enqueueDisputeResolvedNotifications(
+  db: Db,
+  input: {
+    schoolId: string;
+    sessionId: string;
+    outcome: "released" | "refunded";
+    refundedCents?: number;
+  },
+): Promise<void> {
+  const ctx = await db.query<{ starts_at: Date; school_name: string }>(
+    `SELECT sl.starts_at, s.name AS school_name
+       FROM class_session cs
+       JOIN booking_slot sl ON sl.id = cs.slot_id
+       JOIN school s ON s.id = cs.school_id
+      WHERE cs.id = $1`,
+    [input.sessionId],
+  );
+  const info = ctx.rows[0];
+  const admins = await db.query<{ email: string }>(
+    `SELECT u.email
+       FROM school_user su
+       JOIN app_user u ON u.id = su.user_id
+      WHERE su.school_id = $1 AND su.role IN ('owner', 'admin')
+      ORDER BY u.email`,
+    [input.schoolId],
+  );
+  for (const admin of admins.rows) {
+    await db.query(
+      `INSERT INTO notification_outbox (recipient_email, template, payload)
+       VALUES ($1, 'school_dispute_resolved', $2::jsonb)`,
+      [
+        admin.email,
+        JSON.stringify({
+          outcome: input.outcome,
+          slotStartsAt: info?.starts_at.toISOString() ?? "",
+          schoolName: info?.school_name ?? "",
+          ...(input.refundedCents !== undefined ? { refundedCents: input.refundedCents } : {}),
+        }),
+      ],
+    );
+  }
+}
+
 export type ResolveDisputeResult =
   | { status: "rejected" }
   | { status: "resolved_refund"; refundTxnId: string; releaseTxnId: string };
@@ -88,6 +137,11 @@ export async function resolveDispute(
          VALUES ('system', $1, 'dispute_rejected', 'session_dispute', $2, $3::jsonb)`,
         [dispute.school_id, dispute.id, JSON.stringify({ session_id: dispute.session_id })],
       );
+      await enqueueDisputeResolvedNotifications(db, {
+        schoolId: dispute.school_id,
+        sessionId: dispute.session_id,
+        outcome: "released",
+      });
       return { status: "rejected" };
     }
 
@@ -172,6 +226,12 @@ export async function resolveDispute(
         }),
       ],
     );
+    await enqueueDisputeResolvedNotifications(db, {
+      schoolId: dispute.school_id,
+      sessionId: dispute.session_id,
+      outcome: "refunded",
+      refundedCents: price,
+    });
 
     return { status: "resolved_refund", refundTxnId, releaseTxnId };
   });

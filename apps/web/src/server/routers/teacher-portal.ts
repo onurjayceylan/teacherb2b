@@ -12,8 +12,10 @@ import {
   signJoinToken,
 } from "@teachernow/sessions";
 import { getTeacherPayouts } from "@teachernow/payouts";
+import { payoutDetailsSchema, setPayoutDetails as hrSetPayoutDetails } from "@teachernow/hr";
 import { platformProcedure, publicProcedure, router } from "../trpc";
 import { joinSecret } from "./session";
+import { maskPayoutDetails, readMaskedPayoutDetails } from "./teacher-onboarding";
 
 const tokenSchema = z.string().trim().min(1).max(500);
 
@@ -123,6 +125,8 @@ export const teacherPortalRouter = router({
         teacherName: teacher.fullName,
         timezone: teacher.timezone,
         payableCents,
+        // Maskeli görünüm (method + son 4): ham hesap değeri panele hiç dönmez.
+        payoutDetails: await readMaskedPayoutDetails(db, teacher.teacherId),
         upcoming: upcoming.rows.map((r) => ({
           slotId: r.slot_id,
           schoolName: r.school_name,
@@ -156,6 +160,24 @@ export const teacherPortalRouter = router({
       };
     });
   }),
+
+  // Payout hesabını güncelle (eğitmen, panel token'ıyla): token her istekte doğrulanır.
+  // Doğrulama + yazım @teachernow/hr'da; yanıt yalnız maskeli görünümü döner.
+  updatePayoutDetails: publicProcedure
+    .input(z.object({ token: tokenSchema, details: payoutDetailsSchema }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.pool.withPlatform(async (db) => {
+        const teacher = await getTeacherByPortalToken(db, input.token);
+        if (!teacher) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "This panel link is invalid or has been revoked.",
+          });
+        }
+        await hrSetPayoutDetails(db, teacher.teacherId, input.details);
+        return { ok: true as const, payoutDetails: maskPayoutDetails(input.details) };
+      });
+    }),
 
   // Panel linki üret (platform): ham token yalnız dönen URL'de ve outbox payload'ında
   // yaşar (DB'de hash durur). Panel e-postası AYNI transaction'da outbox'a düşer.

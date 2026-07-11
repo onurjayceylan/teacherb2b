@@ -8,6 +8,7 @@
 // whitelist'i DB trigger'ında — buradaki UPDATE'ler whitelist dışına çıkamaz.
 import type { ActorPool, Db } from "@teachernow/db";
 import { ensureAccount, postTxn, auditSlotAction } from "./ledger.js";
+import { enqueueNotification } from "./notifications.js";
 import { getSlotForUpdate, type SlotRow } from "./slots.js";
 import { offerNext } from "./matcher.js";
 
@@ -70,6 +71,39 @@ async function cancelLiveAssignment(db: Db, slotId: string): Promise<LiveAssignm
   return { teacherId: row.teacher_id, priorStatus: row.status };
 }
 
+/**
+ * Okul iptalinden etkilenen ONAYLI eğitmene 'teacher_slot_cancelled' outbox kaydı —
+ * iptalle AYNI transaction'da. Yalnız okul iptalinde çağrılır: teacherDrop'ta eğitmen
+ * dersi kendisi bıraktığı için ona iptal maili ATILMAZ. Geç iptalde eğitmen payının
+ * %50'si ödenir; şablon bunu lateCancel bayrağından söyler.
+ */
+async function enqueueTeacherCancelledNotification(
+  db: Db,
+  slot: SlotRow,
+  teacherId: string,
+  lateCancel: boolean,
+): Promise<void> {
+  const ctx = await db.query<{ email: string; timezone: string; school_name: string }>(
+    `SELECT t.email, t.timezone, s.name AS school_name
+       FROM teacher t
+       JOIN school s ON s.id = $2
+      WHERE t.id = $1`,
+    [teacherId, slot.school_id],
+  );
+  const row = ctx.rows[0];
+  if (!row) throw new Error(`cancelBySchool: eğitmen bulunamadı (teacher=${teacherId})`);
+  await enqueueNotification(db, {
+    recipientEmail: row.email,
+    template: "teacher_slot_cancelled",
+    payload: {
+      slotStartsAt: slot.starts_at.toISOString(),
+      schoolName: row.school_name,
+      teacherTimezone: row.timezone,
+      lateCancel,
+    },
+  });
+}
+
 export interface CancelBySchoolInput {
   slotId: string;
   now?: Date;
@@ -110,6 +144,10 @@ export async function cancelBySchool(
         [slot.id],
       );
       await auditSlotAction(db, slot, "slot_cancel_early", { occurrence_key: slot.occurrence_key });
+      // Yalnız ONAYLI eğitmen haberdar edilir; henüz teklif aşamasındakine mail atılmaz.
+      if (live?.priorStatus === "confirmed") {
+        await enqueueTeacherCancelledNotification(db, slot, live.teacherId, false);
+      }
       return { slotId: slot.id, status: "cancelled_school_early" };
     }
 
@@ -156,6 +194,10 @@ export async function cancelBySchool(
       teacher_half_cents: tpHalf,
       platform_cents: half - tpHalf,
     });
+    // Onaylı eğitmene iptal + %50 ödeme bilgisi (lateCancel) aynı transaction'da düşer.
+    if (teacherId) {
+      await enqueueTeacherCancelledNotification(db, slot, teacherId, true);
+    }
     return { slotId: slot.id, status: "cancelled_school_late" };
   });
 }
@@ -171,6 +213,8 @@ export type TeacherDropResult =
 /**
  * Onaylı eğitmen dersi bırakır: atama dropped, slot cancelled_teacher, HEMEN re-offer.
  * Aday çıkarsa slot scheduled'a döner (hold'a DOKUNULMAZ); çıkmazsa hold iade edilir.
+ * Bilinçli karar: bırakan eğitmene 'teacher_slot_cancelled' YAZILMAZ — dersi kendisi
+ * bıraktı; iptal bildirimi yalnız okul iptalinden etkilenen eğitmene gider.
  */
 export async function teacherDrop(
   pool: ActorPool,

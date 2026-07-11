@@ -124,6 +124,21 @@ async function assignments(slotId: string): Promise<{ teacher_id: string; status
   });
 }
 
+/** Verilen alıcının 'teacher_slot_cancelled' outbox kayıtları (payload'larıyla). */
+async function cancelledNotices(
+  recipient: string,
+): Promise<{ status: string; payload: Record<string, unknown> }[]> {
+  return tdb.pool.withPlatform(async (db) => {
+    const res = await db.query<{ status: string; payload: Record<string, unknown> }>(
+      `SELECT status, payload FROM notification_outbox
+        WHERE template = 'teacher_slot_cancelled' AND recipient_email = $1
+        ORDER BY created_at`,
+      [recipient],
+    );
+    return res.rows;
+  });
+}
+
 describe("cancelBySchool", () => {
   it("≥24 saat: tam iade, slot cancelled_school_early, canlı atama iptal", async () => {
     const s = await scenario({
@@ -156,7 +171,43 @@ describe("cancelBySchool", () => {
     expect(state.status).toBe("cancelled_school_early");
     expect(state.hold_released_txn_id).not.toBeNull();
     expect(await assignments(slotId)).toEqual([{ teacher_id: teacherId, status: "cancelled" }]);
+    // Atama yalnız 'offered' aşamasındaydı → eğitmene iptal bildirimi YAZILMAZ
+    expect(await cancelledNotices("early.t@example.com")).toEqual([]);
     await assertInvariantsClean(tdb.pool);
+  });
+
+  it("≥24 saat + ONAYLI eğitmen: teacher_slot_cancelled outbox kaydı (lateCancel:false)", async () => {
+    const s = await scenario({
+      name: "early_bildirim",
+      priceCents: 6_000,
+      teacherPayCents: 3_000,
+      topupCents: 6_000,
+      weeks: 1,
+      daysAhead: 12,
+    });
+    await seedTeacher(tdb.pool, {
+      email: "early.confirmed@example.com",
+      timezone: TZ,
+      poolId: s.poolId,
+      availability: allWeekAvailability(),
+    });
+    const slotId = s.slotIds[0]!;
+    await offerAndAccept(slotId);
+    const startsAt = await tdb.pool.withPlatform(
+      async (db) => (await getSlot(db, slotId))!.starts_at,
+    );
+
+    await cancelBySchool(tdb.pool, { slotId });
+
+    const notices = await cancelledNotices("early.confirmed@example.com");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.status).toBe("pending");
+    expect(notices[0]!.payload).toMatchObject({
+      slotStartsAt: startsAt.toISOString(),
+      schoolName: "early_bildirim",
+      teacherTimezone: TZ,
+      lateCancel: false,
+    });
   });
 
   it("<24 saat: okula price-floor(price/2), eğitmene floor(tp/2), kalan platforma", async () => {
@@ -196,6 +247,15 @@ describe("cancelBySchool", () => {
     );
     expect((await slotState(slotId)).status).toBe("cancelled_school_late");
     expect(await assignments(slotId)).toEqual([{ teacher_id: teacherId, status: "cancelled" }]);
+
+    // Geç iptal: aynı transaction'da eğitmene iptal + %50 ödeme bilgisi (lateCancel:true)
+    const notices = await cancelledNotices("late.t@example.com");
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.payload).toMatchObject({
+      slotStartsAt: startsAt.toISOString(),
+      schoolName: "late_okul",
+      lateCancel: true,
+    });
     await assertInvariantsClean(tdb.pool);
   });
 
@@ -283,6 +343,8 @@ describe("teacherDrop", () => {
     expect(state.hold_released_txn_id).not.toBeNull();
     expect(await balance(tdb.pool, "school", s.schoolId, "school_cash")).toBe(9_000);
     expect(await balance(tdb.pool, "school", s.schoolId, "wallet_hold")).toBe(0);
+    // Dersi eğitmen KENDİSİ bıraktı → ona 'teacher_slot_cancelled' YAZILMAZ
+    expect(await cancelledNotices("drop.solo@example.com")).toEqual([]);
     await assertInvariantsClean(tdb.pool);
   });
 });

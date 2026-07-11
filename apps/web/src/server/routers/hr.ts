@@ -12,6 +12,7 @@ import {
   missingDocuments,
   revokeInviteTokens,
   scheduleInterview,
+  timezoneSchema,
   upsertDocument,
 } from "@teachernow/hr";
 import { platformProcedure, router } from "../trpc";
@@ -51,7 +52,8 @@ export const hrRouter = router({
         email: z.string().trim().email().max(320),
         phone: z.string().trim().min(5).max(40).optional(),
         country: z.string().trim().length(2).toUpperCase().optional(),
-        timezone: z.string().trim().max(64).optional(),
+        // IANA doğrulamalı (denetim P1): bozuk tz teklif/e-posta saatlerini kaydırır.
+        timezone: timezoneSchema.optional(),
         source: sourceSchema,
       }),
     )

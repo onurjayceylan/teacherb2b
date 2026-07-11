@@ -6,6 +6,9 @@ import { TRPCError } from "@trpc/server";
 import {
   advanceStatus,
   getTeacherByInviteToken,
+  payoutDetailsSchema,
+  setPayoutDetails as hrSetPayoutDetails,
+  timezoneSchema,
   upsertDocument,
   type InviteTokenTeacher,
 } from "@teachernow/hr";
@@ -55,13 +58,53 @@ function summarize(t: InviteTokenTeacher) {
   return { ...t, step: currentStep(t) };
 }
 
+export interface MaskedPayoutDetails {
+  method: "wise_email" | "iban";
+  maskedValue: string;
+  accountHolder: string;
+}
+
+/**
+ * Payout hesap bilgisi API'den ASLA açık dönmez: method + değerin son 4 karakteri.
+ * (Ham değer yalnız platform bağlamındaki payout CSV export'unda kullanılır.)
+ */
+export function maskPayoutDetails(raw: unknown): MaskedPayoutDetails | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const d = raw as Record<string, unknown>;
+  const method = d.method;
+  const value = typeof d.value === "string" ? d.value : "";
+  const holder =
+    typeof d.accountHolder === "string"
+      ? d.accountHolder
+      : typeof d.account_holder === "string"
+        ? d.account_holder
+        : "";
+  if ((method !== "wise_email" && method !== "iban") || value.length === 0) return null;
+  return { method, maskedValue: `••••${value.slice(-4)}`, accountHolder: holder };
+}
+
+/** Eğitmenin kayıtlı payout bilgisini maskeli okur (platform bağlamında). */
+export async function readMaskedPayoutDetails(
+  db: Db,
+  teacherId: string,
+): Promise<MaskedPayoutDetails | null> {
+  const res = await db.query<{ payout_details: unknown }>(
+    "SELECT payout_details FROM teacher WHERE id = $1",
+    [teacherId],
+  );
+  return maskPayoutDetails(res.rows[0]?.payout_details ?? null);
+}
+
 export const teacherOnboardingRouter = router({
   get: publicProcedure
     .input(z.object({ token: tokenSchema }))
     .query(async ({ ctx, input }) => {
       return ctx.pool.withPlatform(async (db) => {
         const teacher = await requireTeacherByToken(db, input.token);
-        return summarize(teacher);
+        return {
+          ...summarize(teacher),
+          payoutDetails: await readMaskedPayoutDetails(db, teacher.teacherId),
+        };
       });
     }),
 
@@ -71,7 +114,8 @@ export const teacherOnboardingRouter = router({
         token: tokenSchema,
         phone: z.string().trim().min(5).max(40).optional(),
         country: z.string().trim().length(2).toUpperCase().optional(),
-        timezone: z.string().trim().min(1).max(64).optional(),
+        // IANA doğrulamalı (denetim P1): bozuk tz eğitmenin ders saatlerini kaydırır.
+        timezone: timezoneSchema.optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -138,6 +182,19 @@ export const teacherOnboardingRouter = router({
           ...(input.note ? { note: input.note } : {}),
         });
         return { ok: true };
+      });
+    }),
+
+  // Payout hesabı (Wise e-postası / IBAN): onboarding'de OPSİYONEL — atlanabilir;
+  // eksikse panel "Add your payout details" uyarısı gösterir, CSV'de kolon boş çıkar.
+  // Doğrulama + yazım @teachernow/hr'da (payoutDetailsSchema + setPayoutDetails).
+  setPayoutDetails: publicProcedure
+    .input(z.object({ token: tokenSchema, details: payoutDetailsSchema }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.pool.withPlatform(async (db) => {
+        const teacher = await requireTeacherByToken(db, input.token);
+        await hrSetPayoutDetails(db, teacher.teacherId, input.details);
+        return { ok: true as const, payoutDetails: maskPayoutDetails(input.details) };
       });
     }),
 });

@@ -161,6 +161,66 @@ describe("banka top-up akışı", () => {
     });
   });
 
+  it("settle sonrası okulun owner/admin'ine school_topup_settled düşer; finance almaz", async () => {
+    // Okul üyeleri: owner + admin bildirim alır, finance almaz (SLA eskalasyon deseni)
+    await tdb.pool.withPlatform(async (db) => {
+      for (const [email, role] of [
+        ["topup.owner@okul.com", "owner"],
+        ["topup.admin@okul.com", "admin"],
+        ["topup.finance@okul.com", "finance"],
+      ] as const) {
+        const user = await db.query<{ id: string }>(
+          "INSERT INTO app_user (email, name) VALUES ($1, 'Topup Kullanıcısı') RETURNING id",
+          [email],
+        );
+        await db.query("INSERT INTO school_user (school_id, user_id, role) VALUES ($1, $2, $3)", [
+          schoolId,
+          user.rows[0]!.id,
+          role,
+        ]);
+      }
+    });
+
+    const { id, referenceCode } = await tdb.pool.withSchool([schoolId], (db) =>
+      createBankTopup(db, { schoolId, amountCents: 33_000 }),
+    );
+    await tdb.pool.withPlatform((db) => adminSettleBankTopup(db, { topupId: id }));
+
+    const rows = await tdb.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        recipient_email: string;
+        status: string;
+        payload: Record<string, unknown>;
+      }>(
+        `SELECT recipient_email, status, payload
+           FROM notification_outbox
+          WHERE template = 'school_topup_settled'
+          ORDER BY recipient_email`,
+      );
+      return res.rows;
+    });
+    expect(rows.map((r) => r.recipient_email)).toEqual([
+      "topup.admin@okul.com",
+      "topup.owner@okul.com",
+    ]);
+    for (const row of rows) {
+      expect(row.status).toBe("pending");
+      expect(row.payload["amountCents"]).toBe(33_000);
+      expect(row.payload["referenceCode"]).toBe(referenceCode);
+      expect(row.payload["schoolName"]).toBe("Test Okul");
+    }
+
+    // Replay (alreadySettled) bildirim ÇOĞALTMAZ
+    await tdb.pool.withPlatform((db) => adminSettleBankTopup(db, { topupId: id }));
+    const again = await tdb.pool.withPlatform(async (db) => {
+      const res = await db.query<{ n: string }>(
+        "SELECT count(*) AS n FROM notification_outbox WHERE template = 'school_topup_settled'",
+      );
+      return Number(res.rows[0]!.n);
+    });
+    expect(again).toBe(2);
+  });
+
   it("payments_frozen iken settle exception atar ve bakiye değişmez", async () => {
     const before = await cashBalance(schoolId);
     const { id } = await tdb.pool.withSchool([schoolId], (db) =>

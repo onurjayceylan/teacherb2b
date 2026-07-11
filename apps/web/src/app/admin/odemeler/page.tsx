@@ -58,6 +58,51 @@ interface SweepResult {
   escalated: number;
 }
 
+interface MissingPayoutTeacher {
+  teacherId: string;
+  name: string;
+  email: string;
+}
+
+interface Chargeback {
+  id: string;
+  disputeId: string;
+  paymentIntentId: string | null;
+  amountCents: number;
+  currency: string;
+  status: string;
+  createdAt: Date;
+  schoolName: string | null;
+  open: boolean;
+}
+
+interface BalanceSnapshot {
+  id: string;
+  provider: "stripe" | "wise";
+  balanceCents: number;
+  currency: string;
+  source: string;
+  note: string | null;
+  capturedAt: Date;
+}
+
+interface Reconciliation {
+  provider: "stripe" | "wise";
+  ledgerExpectedCents: number;
+  snapshotCents: number | null;
+  snapshotAt: Date | null;
+  diffCents: number | null;
+}
+
+const CHARGEBACK_STATUS: Record<string, { label: string; ok: boolean }> = {
+  needs_response: { label: "yanıt bekliyor", ok: false },
+  under_review: { label: "incelemede", ok: false },
+  won: { label: "kazanıldı", ok: true },
+  lost: { label: "kaybedildi", ok: false },
+};
+
+const PROVIDER_LABELS: Record<string, string> = { stripe: "Stripe", wise: "Wise" };
+
 const PAYOUT_STATUS: Record<string, { label: string; ok: boolean }> = {
   pending: { label: "bekliyor", ok: false },
   submitted: { label: "Wise'a yüklendi", ok: false },
@@ -101,15 +146,29 @@ export default function OdemelerPage() {
   const [importSummary, setImportSummary] = useState<ImportSummary | null>(null);
   const [sweep, setSweep] = useState<SweepResult | null>(null);
 
+  const [missingPayout, setMissingPayout] = useState<MissingPayoutTeacher[]>([]);
+  const [chargebacks, setChargebacks] = useState<Chargeback[]>([]);
+  const [snapshots, setSnapshots] = useState<BalanceSnapshot[]>([]);
+  const [reconciliation, setReconciliation] = useState<Reconciliation[]>([]);
+  const [wiseBalance, setWiseBalance] = useState("");
+  const [wiseNote, setWiseNote] = useState("");
+
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const [batchesRes, recentRes] = await Promise.all([
+      const [batchesRes, recentRes, missingRes, chargebacksRes, balancesRes] = await Promise.all([
         trpc.payouts.listBatches.query(),
         trpc.payouts.listRecent.query(),
+        trpc.payouts.missingPayoutDetails.query(),
+        trpc.admin.listChargebacks.query(),
+        trpc.admin.listExternalBalances.query(),
       ]);
       setBatches(batchesRes);
       setRecent(recentRes);
+      setMissingPayout(missingRes);
+      setChargebacks(chargebacksRes);
+      setSnapshots(balancesRes.snapshots);
+      setReconciliation(balancesRes.reconciliation);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -185,6 +244,24 @@ export default function OdemelerPage() {
           Dönem içinde settle edilmiş ve daha önce ödenmemiş dersler eğitmen başına tek payout'ta
           toplanır. Evrak seti tamamlanmamış (hard-gate) eğitmenler tutulur ve aşağıda listelenir.
         </p>
+        {missingPayout.length > 0 ? (
+          <div>
+            <p className="error">
+              Şu eğitmenlerin ödeme bilgisi eksik; CSV&apos;de boş çıkacak:
+            </p>
+            <ul>
+              {missingPayout.map((t) => (
+                <li key={t.teacherId}>
+                  {t.name} <span className="muted">({t.email})</span>
+                </li>
+              ))}
+            </ul>
+            <p className="muted">
+              Eğitmen, panelindeki &quot;Payout details&quot; formundan Wise e-postasını / IBAN&apos;ını
+              girebilir.
+            </p>
+          </div>
+        ) : null}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -458,6 +535,180 @@ export default function OdemelerPage() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Kart itirazları (chargeback)</h2>
+        <p className="muted">
+          Stripe&apos;tan gelen kart itirazları — salt görünürlük; para düzeltmesi mevcut
+          iade/reversal yollarıyla yapılır. Açık itirazlar üstte.
+        </p>
+        {chargebacks.length === 0 ? (
+          <p className="muted">Kart itirazı yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tarih</th>
+                  <th>Tutar</th>
+                  <th>Durum</th>
+                  <th>Okul</th>
+                  <th>Dispute ID</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chargebacks.map((c) => {
+                  const st = CHARGEBACK_STATUS[c.status] ?? { label: c.status, ok: false };
+                  return (
+                    <tr key={c.id}>
+                      <td>{new Date(c.createdAt).toLocaleString("tr-TR")}</td>
+                      <td>{formatCents(c.amountCents, c.currency)}</td>
+                      <td>
+                        <span className={`badge ${st.ok ? "ok" : "warn"}`}>{st.label}</span>
+                      </td>
+                      <td>{c.schoolName ?? <span className="muted">eşleşmedi</span>}</td>
+                      <td className="mono">{c.disputeId}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Dış bakiye mutabakatı (Stripe / Wise)</h2>
+        <p className="muted">
+          Ledger&apos;daki clearing hesabına göre sağlayıcıda olması beklenen para ile son bildirilen
+          gerçek bakiye karşılaştırılır; fark varsa satır kırmızı uyarı verir.
+        </p>
+        <div style={{ overflowX: "auto" }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Sağlayıcı</th>
+                <th>Ledger beklentisi</th>
+                <th>Son bakiye bildirimi</th>
+                <th>Fark</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reconciliation.map((r) => (
+                <tr key={r.provider}>
+                  <td>{PROVIDER_LABELS[r.provider] ?? r.provider}</td>
+                  <td>{formatCents(r.ledgerExpectedCents)}</td>
+                  <td>
+                    {r.snapshotCents === null ? (
+                      <span className="muted">bildirim yok</span>
+                    ) : (
+                      <>
+                        {formatCents(r.snapshotCents)}{" "}
+                        <span className="muted">
+                          ({r.snapshotAt ? new Date(r.snapshotAt).toLocaleString("tr-TR") : "—"})
+                        </span>
+                      </>
+                    )}
+                  </td>
+                  <td>
+                    {r.diffCents === null ? (
+                      <span className="muted">—</span>
+                    ) : r.diffCents === 0 ? (
+                      <span className="badge ok">mutabık</span>
+                    ) : (
+                      <span className="error">
+                        UYUŞMAZLIK: {formatCents(r.diffCents)} — kayıtları kontrol edin
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 style={{ marginTop: "1rem" }}>Manuel Wise bakiye girişi</h3>
+        <p className="muted">
+          Wise panosunda görünen güncel bakiyeyi girin (USD). Para OYNAMAZ — yalnız mutabakat
+          kaydı oluşur.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const parsed = Number(wiseBalance.replace(",", "."));
+            if (!Number.isFinite(parsed)) {
+              setActionError("Geçerli bir tutar girin (örn. 1250.00)");
+              return;
+            }
+            void run(async () => {
+              await trpc.admin.recordExternalBalance.mutate({
+                balanceCents: Math.round(parsed * 100),
+                ...(wiseNote.trim() ? { note: wiseNote.trim() } : {}),
+              });
+              setWiseBalance("");
+              setWiseNote("");
+            }, "Wise bakiye kaydı alındı");
+          }}
+        >
+          <div className="row">
+            <div>
+              <label htmlFor="wb-amount">Bakiye (USD)</label>
+              <input
+                id="wb-amount"
+                inputMode="decimal"
+                value={wiseBalance}
+                onChange={(e) => setWiseBalance(e.target.value)}
+                placeholder="1250.00"
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="wb-note">Not (opsiyonel)</label>
+              <input
+                id="wb-note"
+                value={wiseNote}
+                onChange={(e) => setWiseNote(e.target.value)}
+                placeholder="örn. Wise panosu 11 Tem"
+              />
+            </div>
+            <div>
+              <button type="submit" disabled={busy}>
+                Bakiyeyi kaydet
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <h3 style={{ marginTop: "1rem" }}>Son bakiye bildirimleri</h3>
+        {snapshots.length === 0 ? (
+          <p className="muted">Henüz bakiye bildirimi yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tarih</th>
+                  <th>Sağlayıcı</th>
+                  <th>Bakiye</th>
+                  <th>Kaynak</th>
+                  <th>Not</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshots.map((s) => (
+                  <tr key={s.id}>
+                    <td>{new Date(s.capturedAt).toLocaleString("tr-TR")}</td>
+                    <td>{PROVIDER_LABELS[s.provider] ?? s.provider}</td>
+                    <td>{formatCents(s.balanceCents, s.currency)}</td>
+                    <td>{s.source === "manual" ? "manuel" : "API"}</td>
+                    <td className="muted">{s.note ?? "—"}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>

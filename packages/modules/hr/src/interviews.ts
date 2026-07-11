@@ -7,9 +7,19 @@ export interface ScheduleInterviewInput {
   /** ISO-8601 zaman damgası. */
   scheduledAt: string;
   interviewerUserId?: string;
+  /** Görüşme linki (varsa) — DB'de tutulmaz, yalnız bildirim payload'ına girer. */
+  meetingUrl?: string;
 }
 
 export async function scheduleInterview(db: Db, input: ScheduleInterviewInput): Promise<string> {
+  // Eğitmen önce yüklenir (e-posta bildirim için gerekir); yoksa anlamlı hata.
+  const teacher = await db.query<{ email: string; timezone: string }>(
+    "SELECT email, timezone FROM teacher WHERE id = $1",
+    [input.teacherId],
+  );
+  const t = teacher.rows[0];
+  if (!t) throw new Error(`scheduleInterview: teacher bulunamadı: ${input.teacherId}`);
+
   const res = await db.query<{ id: string }>(
     `INSERT INTO hr_interview (teacher_id, scheduled_at, interviewer_user_id)
      VALUES ($1, $2, $3)
@@ -18,6 +28,21 @@ export async function scheduleInterview(db: Db, input: ScheduleInterviewInput): 
   );
   const row = res.rows[0];
   if (!row) throw new Error("scheduleInterview: hr_interview INSERT satır dönmedi");
+
+  // Eğitmen AYNI transaction'da haberdar edilir (outbox deseni — 0012); gönderim
+  // worker dispatcher'ın işi. recipient_email PII: yalnız DB'ye yazılır, loglanmaz.
+  await db.query(
+    `INSERT INTO notification_outbox (recipient_email, template, payload)
+     VALUES ($1, 'teacher_interview_scheduled', $2::jsonb)`,
+    [
+      t.email,
+      JSON.stringify({
+        scheduledAt: input.scheduledAt,
+        teacherTimezone: t.timezone,
+        ...(input.meetingUrl ? { meetingUrl: input.meetingUrl } : {}),
+      }),
+    ],
+  );
   return row.id;
 }
 

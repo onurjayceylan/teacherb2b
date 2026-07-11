@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import type { Db } from "@teachernow/db";
 import { ensureAccount, postTxn } from "./ledger.js";
+import { enqueueNotification } from "./notifications.js";
 
 export interface CreateCardTopupInput {
   schoolId: string;
@@ -89,8 +90,9 @@ export async function adminSettleBankTopup(
     amount_cents: string;
     currency: string;
     status: string;
+    bank_reference_code: string | null;
   }>(
-    `SELECT id, school_id, amount_cents, currency, status
+    `SELECT id, school_id, amount_cents, currency, status, bank_reference_code
        FROM topup_attempt WHERE id = $1 FOR UPDATE`,
     [input.topupId],
   );
@@ -126,6 +128,29 @@ export async function adminSettleBankTopup(
      VALUES ('platform_admin', $1, 'bank_topup_settled', 'topup_attempt', $2, $3::jsonb)`,
     [topup.school_id, topup.id, JSON.stringify({ status: "settled", settled_txn_id: txnId })],
   );
+
+  // Okulun owner/admin kullanıcıları AYNI transaction'da haberdar edilir
+  // (outbox deseni — dispatch'in school_sla_escalated alıcı çözümüyle aynı).
+  const members = await db.query<{ email: string; school_name: string }>(
+    `SELECT u.email, s.name AS school_name
+       FROM school_user su
+       JOIN app_user u ON u.id = su.user_id
+       JOIN school s ON s.id = su.school_id
+      WHERE su.school_id = $1 AND su.role IN ('owner', 'admin')
+      ORDER BY u.email`,
+    [topup.school_id],
+  );
+  for (const member of members.rows) {
+    await enqueueNotification(db, {
+      recipientEmail: member.email,
+      template: "school_topup_settled",
+      payload: {
+        schoolName: member.school_name,
+        amountCents: Number(topup.amount_cents),
+        referenceCode: topup.bank_reference_code,
+      },
+    });
+  }
 
   return { alreadySettled: false, txnId };
 }

@@ -1,25 +1,14 @@
 // Transactional bildirim outbox'ı (0012): domain yazımıyla AYNI transaction'da INSERT.
-// Gönderim worker dispatcher'ın işi — burada yalnız kayıt açılır. recipient_email PII'dır:
-// yalnız DB'ye yazılır, ASLA loglanmaz.
+// dispatch/notifications.ts'in billing-yerel eşi — modüller birbirini import etmez
+// (boundary), desen aynıdır. recipient_email PII'dır: yalnız DB'ye yazılır, ASLA loglanmaz.
 import type { Db } from "@teachernow/db";
 
-// 0013 CHECK'indeki şablon listesinin aynası — CHECK genişlerse burası da genişler.
-export type NotificationTemplate =
-  | "teacher_offer"
-  | "teacher_invite"
-  | "teacher_portal"
-  | "school_sla_escalated"
-  | "school_low_balance"
-  | "teacher_doc_reminder"
-  | "teacher_slot_cancelled"
-  | "teacher_interview_scheduled"
-  | "school_dispute_resolved"
-  | "school_topup_settled"
-  | "platform_alert";
+/** billing'in yazdığı şablonlar (0013 CHECK'inin alt kümesi). */
+export type BillingNotificationTemplate = "school_topup_settled" | "platform_alert";
 
 export interface EnqueueNotificationInput {
   recipientEmail: string;
-  template: NotificationTemplate;
+  template: BillingNotificationTemplate;
   payload: Record<string, unknown>;
 }
 

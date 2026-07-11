@@ -2,6 +2,7 @@
 // Durum makinesi DB trigger'ında (0005) — burada yalnız UPDATE atılır, hata olduğu gibi fırlar.
 import type { Db } from "@teachernow/db";
 import { DOCUMENT_KINDS, seedMissingDocuments } from "./documents.js";
+import { timezoneSchema } from "./profile.js";
 
 export type TeacherSource = "site" | "ilan" | "hrmasterz";
 export type TeacherStatus =
@@ -30,6 +31,13 @@ function isUniqueViolation(err: unknown): boolean {
 
 /** Tekil davet: teacher 'invited' olarak açılır, 5 evrak kind'ı 'missing' seed edilir. */
 export async function inviteTeacher(db: Db, input: InviteTeacherInput): Promise<string> {
+  // Timezone eğitmenin teklif/müsaitlik matematiğinin temelidir — bozuk değer içeri giremez.
+  if (input.timezone !== undefined) {
+    const tz = timezoneSchema.safeParse(input.timezone);
+    if (!tz.success) {
+      throw new Error(`inviteTeacher: ${tz.error.issues[0]?.message ?? "invalid timezone"}`);
+    }
+  }
   let res;
   try {
     res = await db.query<{ id: string }>(

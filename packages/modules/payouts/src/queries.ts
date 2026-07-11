@@ -1,6 +1,6 @@
 // Salt-okur sorgular: reconciler + admin UI (listOpen) ve eğitmen paneli
 // (getTeacherPayouts). Para/durum yazmazlar.
-import type { ActorPool } from "@teachernow/db";
+import type { ActorPool, Db } from "@teachernow/db";
 
 export interface OpenPayoutRow {
   id: string;
@@ -57,6 +57,28 @@ export interface TeacherPayoutRow {
   failureReason: string | null;
   paidAt: Date | null;
   createdAt: Date;
+}
+
+export interface TeacherMissingPayoutDetailsRow {
+  teacherId: string;
+  name: string;
+  email: string;
+}
+
+/**
+ * Payout hesap bilgisi (teacher.payout_details) girilmemiş AKTİF eğitmenler —
+ * batch export öncesi operasyon kontrol listesi (CSV'de kolonları boş çıkanlar).
+ */
+export async function teachersMissingPayoutDetails(
+  db: Db,
+): Promise<Array<{ teacherId: string; name: string; email: string }>> {
+  const res = await db.query<{ id: string; full_name: string; email: string }>(
+    `SELECT id, full_name, email
+       FROM teacher
+      WHERE status = 'active' AND payout_details IS NULL
+      ORDER BY full_name, id`,
+  );
+  return res.rows.map((r) => ({ teacherId: r.id, name: r.full_name, email: r.email }));
 }
 
 /** Eğitmenin son payout'ları (portal paneli). */

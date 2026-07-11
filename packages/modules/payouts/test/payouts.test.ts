@@ -12,6 +12,7 @@ import {
   importResults,
   listOpen,
   markBatchSubmitted,
+  teachersMissingPayoutDetails,
 } from "../src/index.js";
 
 let tdb: TestDb;
@@ -22,6 +23,7 @@ let planId: string;
 
 let readyTeacher: string; // 5 evrak verified → payout_ready=true
 let heldTeacher: string; // evraksız → payout_ready=false (hard-gate)
+let failTeacher: string; // failed-payout senaryosunun eğitmeni (payout detayı YOK)
 let batch1Id: string;
 
 const DOC_KINDS = ["contract", "id_verification", "country_clearance", "tax_form", "payout_method"];
@@ -284,6 +286,19 @@ beforeAll(async () => {
   readyTeacher = await seedTeacher("Aylin Hazir", "payout.ready@example.com", true);
   heldTeacher = await seedTeacher("Baran Evraksiz", "payout.held@example.com", false);
 
+  // readyTeacher'ın payout hesap bilgisi girilmiş (0013 payout_details) — CSV'ye taşınır;
+  // heldTeacher bilinçli olarak DETAYSIZ bırakılır (eksik-detay listesi + boş CSV kolonları).
+  await tdb.pool.withPlatform((db) =>
+    db.query(`UPDATE teacher SET payout_details = $2::jsonb WHERE id = $1`, [
+      readyTeacher,
+      JSON.stringify({
+        method: "wise_email",
+        value: "aylin@wise.example.com",
+        accountHolder: "Aylin Hazir",
+      }),
+    ]),
+  );
+
   // readyTeacher: 2 settled ders (2×1600 = 3200 payable); heldTeacher: 1 settled ders (1600)
   session1 = await settledSession(readyTeacher, { priceCents: 4000, payCents: 1600, daysAgo: 3 });
   session2 = await settledSession(readyTeacher, { priceCents: 4000, payCents: 1600, daysAgo: 2 });
@@ -328,13 +343,17 @@ test("createBatch: payable 3200 → 1 payout + 2 line; evraksız eğitmen batch 
   expect(await batchStatus(batch1Id)).toBe("draft");
 });
 
-test("exportBatchCsv: başlık + pending satır formatı; batch draft→exported", async () => {
+test("exportBatchCsv: başlık + pending satır formatı (payout detayları dahil); batch draft→exported", async () => {
   const csv = await exportBatchCsv(tdb.pool, batch1Id);
   const lines = csv.trim().split("\n");
-  expect(lines[0]).toBe("provider_idempotency_key,teacher_full_name,teacher_email,amount,currency");
+  expect(lines[0]).toBe(
+    "provider_idempotency_key,teacher_full_name,teacher_email,amount,currency," +
+      "payout_method,payout_value,account_holder",
+  );
   expect(lines).toHaveLength(2);
   expect(lines[1]).toBe(
-    `payout:${readyTeacher}:${batch1Id},Aylin Hazir,payout.ready@example.com,32.00,USD`,
+    `payout:${readyTeacher}:${batch1Id},Aylin Hazir,payout.ready@example.com,32.00,USD,` +
+      "wise_email,aylin@wise.example.com,Aylin Hazir",
   );
   expect(await batchStatus(batch1Id)).toBe("exported");
 });
@@ -391,7 +410,7 @@ test("importResults paid: payable 0'a iner, wise_clearing +3200; replay çift d�
 });
 
 test("importResults failed: payable DEĞİŞMEZ; sonraki batch aynı session'ları yeniden toplar", async () => {
-  const failTeacher = await seedTeacher("Ceyda Iban", "payout.fail@example.com", true);
+  failTeacher = await seedTeacher("Ceyda Iban", "payout.fail@example.com", true);
   const failSession = await settledSession(failTeacher, {
     priceCents: 5_000,
     payCents: 2_000,
@@ -403,6 +422,13 @@ test("importResults failed: payable DEĞİŞMEZ; sonraki batch aynı session'lar
   expect(b2.payouts).toBe(1);
   expect(b2.totalCents).toBe(2_000);
   expect(b2.heldTeachers).toEqual([{ teacherId: heldTeacher, amountCents: 1_600 }]);
+
+  // Payout detayı GİRİLMEMİŞ eğitmen: CSV'nin yeni üç kolonu boş kalır
+  const csv = await exportBatchCsv(tdb.pool, b2.batchId);
+  expect(csv.trim().split("\n")[1]).toBe(
+    `payout:${failTeacher}:${b2.batchId},Ceyda Iban,payout.fail@example.com,20.00,USD,,,`,
+  );
+
   await markBatchSubmitted(tdb.pool, b2.batchId);
 
   expect(
@@ -463,4 +489,34 @@ test("boş dönem: hazır eğitmenlerin alacağı kalmadı → payouts 0, held e
   expect(b5.heldTeachers).toEqual([{ teacherId: heldTeacher, amountCents: 1_600 }]);
   expect(await payoutsOfBatch(b5.batchId)).toEqual([]);
   await assertInvariantsClean();
+});
+
+test("teachersMissingPayoutDetails: payout_details NULL olan yalnız AKTİF eğitmenler", async () => {
+  // Aktif olmayan (invited) detaysız eğitmen listeye GİRMEMELİ
+  await tdb.pool.withPlatform((db) =>
+    db.query(
+      `INSERT INTO teacher (full_name, email, source) VALUES ('Davetli Detaysiz', 'payout.invited@example.com', 'site')`,
+    ),
+  );
+
+  const missing = await tdb.pool.withPlatform((db) => teachersMissingPayoutDetails(db));
+  // readyTeacher detaylı → yok; heldTeacher + failTeacher aktif ve detaysız → listede
+  expect(missing).toEqual([
+    { teacherId: heldTeacher, name: "Baran Evraksiz", email: "payout.held@example.com" },
+    { teacherId: failTeacher, name: "Ceyda Iban", email: "payout.fail@example.com" },
+  ]);
+
+  // Detay girilince listeden düşer
+  await tdb.pool.withPlatform((db) =>
+    db.query(`UPDATE teacher SET payout_details = $2::jsonb WHERE id = $1`, [
+      heldTeacher,
+      JSON.stringify({
+        method: "iban",
+        value: "TR330006100519786457841326",
+        accountHolder: "Baran Evraksiz",
+      }),
+    ]),
+  );
+  const after = await tdb.pool.withPlatform((db) => teachersMissingPayoutDetails(db));
+  expect(after.map((t) => t.teacherId)).toEqual([failTeacher]);
 });

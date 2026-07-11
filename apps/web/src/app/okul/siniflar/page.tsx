@@ -12,6 +12,18 @@ interface ClassWithStudents {
   students: { id: string; fullName: string }[];
 }
 
+interface AttendanceReport {
+  completedLessons: number;
+  markedLessons: number;
+  unmarkedLessons: number;
+  students: {
+    studentId: string;
+    fullName: string;
+    attended: number;
+    rate: number | null;
+  }[];
+}
+
 /** "Ad Soyad;Sınıf" satırlarını import satırlarına çevirir; bozuk satırları raporlar. */
 function parseStudentLines(text: string): {
   rows: { fullName: string; className: string }[];
@@ -45,6 +57,28 @@ export default function SiniflarPage() {
   const [className, setClassName] = useState("");
   const [classLevel, setClassLevel] = useState("");
   const [importText, setImportText] = useState("");
+  // Sınıf bazlı devam raporu (okul kendi öğrencisini TAM ADLA görür — okul-scoped ekran).
+  const [reports, setReports] = useState<Record<string, AttendanceReport>>({});
+
+  function toggleReport(classGroupId: string) {
+    if (reports[classGroupId]) {
+      setReports((prev) => {
+        const next = { ...prev };
+        delete next[classGroupId];
+        return next;
+      });
+      return;
+    }
+    void (async () => {
+      setActionError(null);
+      try {
+        const res = await trpc.roster.attendanceReport.query({ classGroupId });
+        setReports((prev) => ({ ...prev, [classGroupId]: res }));
+      } catch (err) {
+        setActionError(errorMessage(err));
+      }
+    })();
+  }
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -195,19 +229,69 @@ export default function SiniflarPage() {
         {classes.length === 0 ? (
           <p className="muted">Henüz sınıf yok.</p>
         ) : (
-          classes.map((c) => (
-            <div key={c.classGroupId} style={{ marginBottom: "1rem" }}>
-              <p>
-                <strong>{c.className}</strong>{" "}
-                <span className="badge ok">{c.count} öğrenci</span>
-              </p>
-              {c.students.length === 0 ? (
-                <p className="muted">Bu sınıfta öğrenci yok.</p>
-              ) : (
-                <p className="muted">{c.students.map((s) => s.fullName).join(", ")}</p>
-              )}
-            </div>
-          ))
+          classes.map((c) => {
+            const report = reports[c.classGroupId];
+            return (
+              <div key={c.classGroupId} style={{ marginBottom: "1rem" }}>
+                <p>
+                  <strong>{c.className}</strong>{" "}
+                  <span className="badge ok">{c.count} öğrenci</span>{" "}
+                  <button
+                    className="secondary"
+                    style={{ marginTop: 0 }}
+                    disabled={busy}
+                    onClick={() => toggleReport(c.classGroupId)}
+                  >
+                    {report ? "Devam raporunu gizle" : "Devam raporu"}
+                  </button>
+                </p>
+                {c.students.length === 0 ? (
+                  <p className="muted">Bu sınıfta öğrenci yok.</p>
+                ) : (
+                  <p className="muted">{c.students.map((s) => s.fullName).join(", ")}</p>
+                )}
+                {report ? (
+                  <div style={{ marginTop: "0.5rem" }}>
+                    {report.markedLessons === 0 ? (
+                      <p className="muted">
+                        Bu sınıfta yoklaması işaretlenmiş tamamlanmış ders yok.
+                      </p>
+                    ) : (
+                      <div style={{ overflowX: "auto" }}>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Öğrenci</th>
+                              <th>Katıldı</th>
+                              <th>İşaretli ders</th>
+                              <th>Devam %</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {report.students.map((s) => (
+                              <tr key={s.studentId}>
+                                <td>{s.fullName}</td>
+                                <td>{s.attended}</td>
+                                <td>{report.markedLessons}</td>
+                                <td>
+                                  {s.rate === null ? "—" : `%${Math.round(s.rate * 100)}`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {report.unmarkedLessons > 0 ? (
+                      <p className="muted">
+                        Yoklama girilmemiş {report.unmarkedLessons} ders (orana dahil değil).
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </div>
     </main>

@@ -1,6 +1,7 @@
 // Roster (okul-scoped): sınıflar + isimli öğrenci listesi (çocuk-PII v3 — yalnız ad-soyad).
 // Tüm erişim ctx.withSchoolDb üzerinden: RLS app.school_ids ile aktif okula sınırlar.
 import { z } from "zod";
+import { TRPCError } from "@trpc/server";
 import type { Db } from "@teachernow/db";
 import { router, schoolProcedure } from "../trpc";
 
@@ -119,4 +120,67 @@ export const rosterRouter = router({
       return [...groups.values()];
     });
   }),
+
+  // Devam raporu (denetim P1): öğrenci başına katıldı / toplam İŞARETLİ ders + oran.
+  // "Tamamlanmış ders" = ended|settled oturum (ders gerçekleşti); yoklaması hiç
+  // işaretlenmemiş dersler orana katılmaz — ayrı sayaçla ("yoklama girilmemiş N ders") döner.
+  // Tüm okuma okul bağlamında: RLS okul-scoped, tam ad okulun KENDİ öğrencisidir.
+  attendanceReport: schoolProcedure
+    .input(z.object({ classGroupId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.withSchoolDb(async (db) => {
+        const cg = await db.query<{ id: string }>(
+          "SELECT id FROM class_group WHERE id = $1",
+          [input.classGroupId],
+        );
+        if (!cg.rows[0]) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "sınıf bulunamadı" });
+        }
+
+        const sessions = await db.query<{ id: string; marked: boolean }>(
+          `SELECT cs.id,
+                  EXISTS (SELECT 1 FROM session_attendance a WHERE a.session_id = cs.id) AS marked
+             FROM class_session cs
+            WHERE cs.class_group_id = $1 AND cs.status IN ('ended', 'settled')`,
+          [input.classGroupId],
+        );
+        const markedIds = sessions.rows.filter((r) => r.marked).map((r) => r.id);
+        const unmarkedLessons = sessions.rows.length - markedIds.length;
+
+        const students = await db.query<{ id: string; full_name: string }>(
+          `SELECT id, full_name FROM student
+            WHERE class_group_id = $1 AND status = 'active'
+            ORDER BY full_name`,
+          [input.classGroupId],
+        );
+
+        const attended = new Map<string, number>();
+        if (markedIds.length > 0) {
+          const att = await db.query<{ student_id: string; n: string }>(
+            `SELECT student_id, count(*) AS n
+               FROM session_attendance
+              WHERE session_id = ANY($1::uuid[]) AND present
+              GROUP BY student_id`,
+            [markedIds],
+          );
+          for (const r of att.rows) attended.set(r.student_id, Number(r.n));
+        }
+
+        return {
+          completedLessons: sessions.rows.length,
+          markedLessons: markedIds.length,
+          unmarkedLessons,
+          students: students.rows.map((s) => {
+            const n = attended.get(s.id) ?? 0;
+            return {
+              studentId: s.id,
+              fullName: s.full_name,
+              attended: n,
+              // Oran yalnız işaretli dersler üzerinden; hiç işaretli ders yoksa null.
+              rate: markedIds.length > 0 ? n / markedIds.length : null,
+            };
+          }),
+        };
+      });
+    }),
 });

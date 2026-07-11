@@ -19,6 +19,8 @@ export {
 export {
   listOpen,
   getTeacherPayouts,
+  teachersMissingPayoutDetails,
   type OpenPayoutRow,
   type TeacherPayoutRow,
+  type TeacherMissingPayoutDetailsRow,
 } from "./queries.js";

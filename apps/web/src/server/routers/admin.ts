@@ -4,6 +4,7 @@ import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { adminSettleBankTopup } from "@teachernow/billing";
 import { getSlotForUpdate, materializePlans, offerNext } from "@teachernow/dispatch";
+import { timezoneSchema } from "@teachernow/hr";
 import { isPaymentsFrozen, setPaymentsFrozen } from "@teachernow/ledger";
 import { resolveDispute, settleSession } from "@teachernow/sessions";
 import { platformProcedure, router } from "../trpc";
@@ -319,7 +320,8 @@ export const adminRouter = router({
           weekday: z.number().int().min(0).max(6), // 0=Pazartesi (ISO)
           startMinute: z.number().int().min(0).max(1439),
           endMinute: z.number().int().min(1).max(1440),
-          timezone: z.string().trim().min(1).max(64),
+          // IANA doğrulamalı (denetim P1): bozuk tz eğitmen eşleştirmesini kaydırır.
+          timezone: timezoneSchema,
         })
         .refine((v) => v.endMinute > v.startMinute, {
           message: "bitiş başlangıçtan sonra olmalı",
@@ -739,4 +741,152 @@ export const adminRouter = router({
       }
       return { disputeId: input.disputeId, decision: input.decision };
     }),
+
+  // ---- Kart itirazları (denetim P1) ----
+
+  // Dispute başına SON durum (aynı dispute'un yaşam döngüsü ayrı event satırlarıyla gelir);
+  // açık olanlar (needs_response/under_review) listenin üstünde. Salt görünürlük — para
+  // düzeltmesi bu uçtan YAPILMAZ (düzeltme = mevcut reversal yolları).
+  listChargebacks: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        id: string;
+        stripe_dispute_id: string;
+        payment_intent_id: string | null;
+        amount_cents: string; // pg bigint → string
+        currency: string;
+        status: string;
+        created_at: Date;
+        school_name: string | null;
+      }>(
+        `SELECT DISTINCT ON (c.stripe_dispute_id)
+                c.id, c.stripe_dispute_id, c.payment_intent_id, c.amount_cents, c.currency,
+                c.status, c.created_at, s.name AS school_name
+           FROM chargeback_event c
+           LEFT JOIN school s ON s.id = c.school_id
+          ORDER BY c.stripe_dispute_id, c.created_at DESC`,
+      );
+      const open = (status: string) => status === "needs_response" || status === "under_review";
+      return res.rows
+        .map((r) => ({
+          id: r.id,
+          disputeId: r.stripe_dispute_id,
+          paymentIntentId: r.payment_intent_id,
+          amountCents: Number(r.amount_cents),
+          currency: r.currency.trim(),
+          status: r.status,
+          createdAt: r.created_at,
+          schoolName: r.school_name,
+          open: open(r.status),
+        }))
+        .sort((a, b) =>
+          a.open === b.open
+            ? b.createdAt.getTime() - a.createdAt.getTime()
+            : a.open
+              ? -1
+              : 1,
+        );
+    });
+  }),
+
+  // ---- Dış bakiye mutabakatı (denetim P1) ----
+
+  // Manuel Wise bakiye beyanı: kurucu Wise panosundan okuduğu değeri girer.
+  // Para OYNAMAZ — yalnız snapshot satırı; mutabakat farkı listExternalBalances'ta görünür.
+  recordExternalBalance: platformProcedure
+    .input(
+      z.object({
+        balanceCents: z
+          .number()
+          .int()
+          .min(-100_000_000_000)
+          .max(100_000_000_000),
+        note: z.string().trim().max(500).optional(),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      return ctx.pool.withPlatform(async (db) => {
+        const res = await db.query<{ id: string }>(
+          `INSERT INTO external_balance_snapshot (provider, balance_cents, currency, source, note)
+           VALUES ('wise', $1, 'USD', 'manual', $2)
+           RETURNING id`,
+          [input.balanceCents, input.note ?? null],
+        );
+        const row = res.rows[0];
+        if (!row) throw new Error("recordExternalBalance: INSERT satır dönmedi");
+        return { id: row.id };
+      });
+    }),
+
+  // Son 10 snapshot + sağlayıcı başına ledger clearing karşılaştırması.
+  // İşaret kuralı: clearing hesapları bu ledger'da varlık tarafını NEGATİF taşır
+  // (topup: school_cash +, stripe_clearing −). Sağlayıcıda "olması gereken" para
+  // dolayısıyla −SUM(entries)'tir; fark = snapshot − beklenen.
+  listExternalBalances: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const snaps = await db.query<{
+        id: string;
+        provider: "stripe" | "wise";
+        balance_cents: string;
+        currency: string;
+        source: string;
+        note: string | null;
+        captured_at: Date;
+      }>(
+        `SELECT id, provider, balance_cents, currency, source, note, captured_at
+           FROM external_balance_snapshot
+          ORDER BY captured_at DESC
+          LIMIT 10`,
+      );
+      // clearing hesapları track_balance dışıdır (cache kolonu güncellenmez) —
+      // bakiye entry toplamından okunur (metrics'teki sum deseni).
+      const ledger = await db.query<{ kind: string; sum_cents: string }>(
+        `SELECT a.kind, COALESCE(sum(e.amount_cents), 0) AS sum_cents
+           FROM ledger_account a
+           LEFT JOIN ledger_entry e ON e.account_id = a.id
+          WHERE a.owner_type = 'platform' AND a.kind IN ('stripe_clearing', 'wise_clearing')
+          GROUP BY a.kind`,
+      );
+      const sums = new Map(ledger.rows.map((r) => [r.kind, Number(r.sum_cents)]));
+      const latest = await db.query<{
+        provider: "stripe" | "wise";
+        balance_cents: string;
+        captured_at: Date;
+      }>(
+        `SELECT DISTINCT ON (provider) provider, balance_cents, captured_at
+           FROM external_balance_snapshot
+          ORDER BY provider, captured_at DESC`,
+      );
+      const latestByProvider = new Map(latest.rows.map((r) => [r.provider, r]));
+
+      const providers: { provider: "stripe" | "wise"; kind: string }[] = [
+        { provider: "stripe", kind: "stripe_clearing" },
+        { provider: "wise", kind: "wise_clearing" },
+      ];
+      return {
+        snapshots: snaps.rows.map((r) => ({
+          id: r.id,
+          provider: r.provider,
+          balanceCents: Number(r.balance_cents),
+          currency: r.currency.trim(),
+          source: r.source,
+          note: r.note,
+          capturedAt: r.captured_at,
+        })),
+        reconciliation: providers.map(({ provider, kind }) => {
+          // 0 - x: negatif sıfır (-0) üretmez (superjson -0'ı ayrıca kodluyor).
+          const expectedCents = 0 - (sums.get(kind) ?? 0);
+          const snap = latestByProvider.get(provider) ?? null;
+          const snapshotCents = snap ? Number(snap.balance_cents) : null;
+          return {
+            provider,
+            ledgerExpectedCents: expectedCents,
+            snapshotCents,
+            snapshotAt: snap?.captured_at ?? null,
+            diffCents: snapshotCents === null ? null : snapshotCents - expectedCents,
+          };
+        }),
+      };
+    });
+  }),
 });

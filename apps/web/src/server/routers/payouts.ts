@@ -11,6 +11,7 @@ import {
   importResults,
   listOpen,
   markBatchSubmitted,
+  teachersMissingPayoutDetails,
   type ImportResultRow,
 } from "@teachernow/payouts";
 import { sweepBackfill } from "@teachernow/dispatch";
@@ -309,6 +310,12 @@ export const payoutsRouter = router({
         paidAt: r.paid_at,
       }));
     });
+  }),
+
+  // Payout hesabı eksik eğitmenler (denetim P1): batch ekranındaki uyarı listesi —
+  // bu eğitmenlerin CSV satırında payout_method/payout_value kolonları boş çıkar.
+  missingPayoutDetails: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => teachersMissingPayoutDetails(db));
   }),
 
   // Backfill süpürücüsü (S5): eğitmen düşmüş slotlara yeniden teklif; SLA aşımında

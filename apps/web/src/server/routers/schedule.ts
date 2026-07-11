@@ -232,6 +232,50 @@ export const scheduleRouter = router({
       }));
     }),
 
+  // Slot yoklaması (okul yüzü, denetim P1): okul KENDİ öğrencisini TAM ADLA görür —
+  // RLS zaten okul-scoped (class_session/session_attendance/student politikaları);
+  // maskeleme yalnız eğitmen yüzünde. Tamamlanmış/bitmiş derslerin yoklama listesi.
+  slotAttendance: schoolProcedure
+    .input(z.object({ slotId: z.string().uuid() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.withSchoolDb(async (db) => {
+        const session = await db.query<{ id: string; status: string }>(
+          "SELECT id, status FROM class_session WHERE slot_id = $1",
+          [input.slotId],
+        );
+        const s = session.rows[0];
+        if (!s) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "bu ders için oturum kaydı yok — yoklama girilmemiş olabilir",
+          });
+        }
+        const att = await db.query<{
+          student_id: string;
+          full_name: string;
+          present: boolean;
+          marked_at: Date;
+        }>(
+          `SELECT a.student_id, st.full_name, a.present, a.marked_at
+             FROM session_attendance a
+             JOIN student st ON st.id = a.student_id
+            WHERE a.session_id = $1
+            ORDER BY st.full_name`,
+          [s.id],
+        );
+        return {
+          sessionId: s.id,
+          sessionStatus: s.status,
+          entries: att.rows.map((r) => ({
+            studentId: r.student_id,
+            fullName: r.full_name,
+            present: r.present,
+            markedAt: r.marked_at,
+          })),
+        };
+      });
+    }),
+
   // Ders katılım linkleri: yalnız onaylı atamalı scheduled slot için üretilir.
   // Sahiplik okul bağlamında (RLS'li SELECT), atama kontrolü platform bağlamında.
   // Token exp = ders bitişi + 2 saat; ham token yalnız dönen URL'lerde yaşar.
@@ -337,8 +381,9 @@ export const scheduleRouter = router({
       }
     }),
 
-  // Gelecekteki (henüz materialize edilmemiş) hafta için atlama. O haftanın slotu zaten
-  // oluşmuşsa exception yine kaydedilir ama kullanıcıya 'slotu ayrıca iptal edin' notu döner.
+  // Gelecekteki hafta için atlama. O haftanın slotu zaten materialize olduysa (denetim P1):
+  // derse >24 saat varsa slot OTOMATİK iptal edilir (erken yol — ücretsiz, hold tam iade);
+  // ≤24 saatse İPTAL EDİLMEZ — geç iptal %50 keser, karar bilinçli olarak okula bırakılır.
   addSkipWeek: schoolProcedure
     .input(
       z.object({
@@ -348,7 +393,9 @@ export const scheduleRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      return ctx.withSchoolDb(async (db) => {
+      // 1) Okul bağlamı: plan sahipliği (RLS) + exception kaydı + o haftanın slotu.
+      //    Slot plan_id + occurrence_key ile bulunur — plan eşleşmesi korunur.
+      const base = await ctx.withSchoolDb(async (db) => {
         const plan = await db.query<{ id: string }>(
           "SELECT id FROM dosage_plan WHERE id = $1",
           [input.planId],
@@ -363,18 +410,56 @@ export const scheduleRouter = router({
            RETURNING id`,
           [input.planId, input.skipDate, input.reason ?? null, ctx.actor.userId],
         );
-        const created = ins.rows.length > 0;
-        const existing = await db.query<{ id: string; status: string }>(
-          "SELECT id, status FROM booking_slot WHERE plan_id = $1 AND occurrence_key = $2",
+        const existing = await db.query<{ id: string; status: string; starts_at: Date }>(
+          "SELECT id, status, starts_at FROM booking_slot WHERE plan_id = $1 AND occurrence_key = $2",
           [input.planId, input.skipDate],
         );
-        const slot = existing.rows[0];
-        const note =
-          slot && slot.status === "scheduled"
-            ? "o hafta zaten oluşmuş — slotu ayrıca iptal edin"
-            : null;
-        return { created, note, existingSlotId: slot?.id ?? null };
+        return { created: ins.rows.length > 0, slot: existing.rows[0] ?? null };
       });
+
+      const slot = base.slot;
+      if (!slot || slot.status !== "scheduled") {
+        // Slot yok (henüz materialize edilmemiş — exception yeterli) ya da zaten sonuçlanmış.
+        return {
+          created: base.created,
+          cancelled: false,
+          note: null,
+          existingSlotId: slot?.id ?? null,
+        };
+      }
+
+      // 2) >24h: erken iptal yolu ücretsizdir — okul adına otomatik iptal (hold tam iade).
+      //    cancelBySchool kendi platform tx'ini açar; sahiplik yukarıdaki RLS'li SELECT'le kanıtlı.
+      if (slot.starts_at.getTime() - Date.now() > 24 * 3_600_000) {
+        try {
+          await cancelBySchool(ctx.pool, { slotId: slot.id });
+          return {
+            created: base.created,
+            cancelled: true,
+            note: "O haftanın dersi de iptal edildi (ücretsiz).",
+            existingSlotId: slot.id,
+          };
+        } catch (err) {
+          // Yarış (slot bu arada başladı/iptal oldu vb.): exception kaydı geçerli kalır,
+          // iptal kararı takvime bırakılır — hata yutulmaz, notta görünür.
+          return {
+            created: base.created,
+            cancelled: false,
+            note: `O haftanın dersi otomatik iptal edilemedi (${
+              err instanceof Error ? err.message : String(err)
+            }) — takvimden iptal edin.`,
+            existingSlotId: slot.id,
+          };
+        }
+      }
+
+      // 3) ≤24h: otomatik İPTAL YOK — geç iptal %50 keser; bilinçli karar okulda.
+      return {
+        created: base.created,
+        cancelled: false,
+        note: "24 saatten yakın — geç iptal %50 ücret keser; takvimden bilerek iptal edin.",
+        existingSlotId: slot.id,
+      };
     }),
 
   pausePlan: schoolProcedure

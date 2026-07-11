@@ -5,6 +5,7 @@ import PgBoss from "pg-boss";
 import { makePool } from "@teachernow/db";
 import { runBackfillSweep } from "./backfill-jobs.js";
 import { runDispatchMaterializer, runOfferTimeoutSweeper } from "./dispatch-jobs.js";
+import { runExternalReconciler } from "./external-reconciler.js";
 import { recordHeartbeat } from "./heartbeat.js";
 import { runHrReminders } from "./hr-reminders.js";
 import { runLowBalanceCheck } from "./low-balance.js";
@@ -20,6 +21,7 @@ const BACKFILL_SWEEPER_QUEUE = "backfill-sweeper";
 const PAYOUT_RECONCILER_QUEUE = "payout-reconciler";
 const LOW_BALANCE_QUEUE = "low-balance-check";
 const NOTIFICATION_DISPATCHER_QUEUE = "notification-dispatcher";
+const EXTERNAL_RECONCILER_QUEUE = "external-reconciler";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -130,6 +132,21 @@ async function main(): Promise<void> {
       );
     }
     await recordHeartbeat(pool, NOTIFICATION_DISPATCHER_QUEUE, result);
+  });
+
+  // Her sabah 07:30'da: dış mutabakat — Stripe/Wise gerçek bakiyesi vs ledger clearing.
+  // STRIPE_SECRET_KEY / manuel Wise snapshot'ı yoksa ilgili taraf sessizce atlanır.
+  await boss.createQueue(EXTERNAL_RECONCILER_QUEUE);
+  await boss.schedule(EXTERNAL_RECONCILER_QUEUE, "30 7 * * *");
+  await boss.work(EXTERNAL_RECONCILER_QUEUE, async () => {
+    const result = await runExternalReconciler(pool);
+    if (result.stripe.alarmed || result.wise.alarmed) {
+      console.warn(
+        `external-reconciler: bakiye farkı — stripe=${result.stripe.diffCents ?? "atlandı"} ` +
+          `wise=${result.wise.diffCents ?? "atlandı"} (cent)`,
+      );
+    }
+    await recordHeartbeat(pool, EXTERNAL_RECONCILER_QUEUE, result);
   });
 
   let stopping = false;

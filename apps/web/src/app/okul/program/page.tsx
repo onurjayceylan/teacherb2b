@@ -60,6 +60,19 @@ interface JoinLinks {
   classUrl: string;
 }
 
+interface AttendanceEntry {
+  studentId: string;
+  fullName: string;
+  present: boolean;
+  markedAt: Date;
+}
+
+interface SlotAttendance {
+  sessionId: string;
+  sessionStatus: string;
+  entries: AttendanceEntry[];
+}
+
 const SESSION_STATUS_LABELS: Record<string, string> = {
   created: "oda açıldı",
   started: "ders sürüyor",
@@ -139,6 +152,8 @@ export default function ProgramPage() {
   const [skipReason, setSkipReason] = useState("");
   // Üretilen katılım linkleri slot bazında gösterilir; ham token yalnız bu state'te yaşar.
   const [joinLinks, setJoinLinks] = useState<Record<string, JoinLinks>>({});
+  // Slot bazlı yoklama görünümü (okul kendi öğrencisini TAM ADLA görür — okul-scoped ekran).
+  const [attendance, setAttendance] = useState<Record<string, SlotAttendance>>({});
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -252,6 +267,21 @@ export default function ProgramPage() {
       const links = await trpc.schedule.joinLinks.mutate({ slotId: slot.id });
       setJoinLinks((prev) => ({ ...prev, [slot.id]: links }));
       setNotice("Katılım linkleri üretildi — kopyalayıp eğitmene/sınıfa iletin.");
+    }, null);
+  }
+
+  function toggleAttendance(slot: Slot) {
+    if (attendance[slot.id]) {
+      setAttendance((prev) => {
+        const next = { ...prev };
+        delete next[slot.id];
+        return next;
+      });
+      return;
+    }
+    void run(async () => {
+      const res = await trpc.schedule.slotAttendance.query({ slotId: slot.id });
+      setAttendance((prev) => ({ ...prev, [slot.id]: res }));
     }, null);
   }
 
@@ -612,7 +642,36 @@ export default function ProgramPage() {
                                 İtiraz et
                               </button>
                             ) : null}
+                            {s.sessionId &&
+                            (s.sessionStatus === "ended" || s.sessionStatus === "settled") ? (
+                              <button
+                                className="secondary"
+                                style={{ marginTop: 0 }}
+                                disabled={busy}
+                                onClick={() => toggleAttendance(s)}
+                              >
+                                {attendance[s.id] ? "Yoklamayı gizle" : "Yoklama"}
+                              </button>
+                            ) : null}
                           </div>
+                          {attendance[s.id] ? (
+                            <div style={{ marginTop: "0.35rem", fontSize: "0.85rem" }}>
+                              {attendance[s.id]!.entries.length === 0 ? (
+                                <span className="muted">Bu ders için yoklama girilmemiş.</span>
+                              ) : (
+                                <ul style={{ margin: 0, paddingLeft: "1.1rem" }}>
+                                  {attendance[s.id]!.entries.map((a) => (
+                                    <li key={a.studentId}>
+                                      {a.fullName}{" "}
+                                      <span className={`badge ${a.present ? "ok" : "warn"}`}>
+                                        {a.present ? "katıldı" : "gelmedi"}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ) : null}
                           {links ? (
                             <div
                               className="mono"

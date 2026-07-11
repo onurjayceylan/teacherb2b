@@ -16,6 +16,13 @@ type DocumentKind =
   | "payout_method";
 type DocumentStatus = "missing" | "submitted" | "verified" | "rejected" | "expired";
 type Step = "profile" | "contract" | "documents" | "review";
+type PayoutMethod = "wise_email" | "iban";
+
+interface MaskedPayout {
+  method: PayoutMethod;
+  maskedValue: string;
+  accountHolder: string;
+}
 
 interface OnboardingData {
   teacherId: string;
@@ -26,6 +33,22 @@ interface OnboardingData {
   phone: string | null;
   documents: { kind: DocumentKind; status: DocumentStatus }[];
   step: Step;
+  payoutDetails: MaskedPayout | null;
+}
+
+const PAYOUT_METHOD_LABELS: Record<PayoutMethod, string> = {
+  wise_email: "Wise e-mail",
+  iban: "IBAN",
+};
+
+/** Client-side IANA check so the teacher sees an English error before submitting. */
+function isValidTimezone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 const STEPS: { key: Step; label: string }[] = [
@@ -106,6 +129,9 @@ export default function EgitmenDavetPage() {
   const [timezone, setTimezone] = useState("");
   const [typedName, setTypedName] = useState("");
   const [docNotes, setDocNotes] = useState<Record<string, string>>({});
+  const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("wise_email");
+  const [payoutValue, setPayoutValue] = useState("");
+  const [payoutHolder, setPayoutHolder] = useState("");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -201,6 +227,10 @@ export default function EgitmenDavetPage() {
         <form
           onSubmit={(e) => {
             e.preventDefault();
+            if (timezone.trim() && !isValidTimezone(timezone.trim())) {
+              setActionError("Please enter a valid time zone, e.g. Asia/Manila.");
+              return;
+            }
             void run(
               () =>
                 trpc.teacherOnboarding.submitProfile.mutate({
@@ -380,6 +410,83 @@ export default function EgitmenDavetPage() {
             })}
           </tbody>
         </table>
+      </div>
+
+      <div className="card">
+        <h2>Payout details (Wise)</h2>
+        <p className="muted">
+          Optional — you can skip this step and add it later from your teacher panel. Add your
+          payout details to receive payments.
+        </p>
+        {data.payoutDetails ? (
+          <p className="success">
+            Saved: {PAYOUT_METHOD_LABELS[data.payoutDetails.method]}{" "}
+            <span className="mono">{data.payoutDetails.maskedValue}</span> — account holder{" "}
+            {data.payoutDetails.accountHolder}. You can update it below.
+          </p>
+        ) : (
+          <p className="muted">
+            <span className="badge warn">Not set</span> No payout details on file yet.
+          </p>
+        )}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async () => {
+              await trpc.teacherOnboarding.setPayoutDetails.mutate({
+                token,
+                details: {
+                  method: payoutMethod,
+                  value: payoutValue.trim(),
+                  accountHolder: payoutHolder.trim(),
+                },
+              });
+              setPayoutValue("");
+              setPayoutHolder("");
+            }, "Payout details saved");
+          }}
+        >
+          <div className="row">
+            <div>
+              <label htmlFor="po-method">Method</label>
+              <select
+                id="po-method"
+                value={payoutMethod}
+                onChange={(e) => setPayoutMethod(e.target.value as PayoutMethod)}
+              >
+                <option value="wise_email">Wise e-mail</option>
+                <option value="iban">IBAN</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="po-value">
+                {payoutMethod === "wise_email" ? "Wise account e-mail" : "IBAN"}
+              </label>
+              <input
+                id="po-value"
+                value={payoutValue}
+                onChange={(e) => setPayoutValue(e.target.value)}
+                placeholder={payoutMethod === "wise_email" ? "you@example.com" : "TR00 0000 ..."}
+                required
+                minLength={5}
+              />
+            </div>
+            <div>
+              <label htmlFor="po-holder">Account holder (full legal name)</label>
+              <input
+                id="po-holder"
+                value={payoutHolder}
+                onChange={(e) => setPayoutHolder(e.target.value)}
+                placeholder={data.fullName}
+                required
+                minLength={2}
+              />
+            </div>
+          </div>
+          <button type="submit" disabled={busy}>
+            Save payout details
+          </button>
+        </form>
       </div>
 
       {data.step === "review" ? (

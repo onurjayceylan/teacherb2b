@@ -37,3 +37,9 @@ export {
   type InviteTokenDocument,
   type InviteTokenTeacher,
 } from "./invites.js";
+export {
+  payoutDetailsSchema,
+  setPayoutDetails,
+  timezoneSchema,
+  type PayoutDetails,
+} from "./profile.js";

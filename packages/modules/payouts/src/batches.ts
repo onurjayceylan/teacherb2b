@@ -121,7 +121,11 @@ function csvField(value: string): string {
   return value;
 }
 
-const CSV_HEADER = "provider_idempotency_key,teacher_full_name,teacher_email,amount,currency";
+// payout_method/payout_value/account_holder teacher.payout_details'ten gelir (0013);
+// bilgi girilmemişse kolonlar boş kalır — eksikler teachersMissingPayoutDetails'te görünür.
+const CSV_HEADER =
+  "provider_idempotency_key,teacher_full_name,teacher_email,amount,currency," +
+  "payout_method,payout_value,account_holder";
 
 /**
  * Batch'in pending payout'larını Wise'a elle yüklenecek CSV'ye döker ve batch'i
@@ -146,8 +150,14 @@ export async function exportBatchCsv(pool: ActorPool, batchId: string): Promise<
       email: string;
       amount_cents: string;
       currency: string;
+      payout_method: string;
+      payout_value: string;
+      account_holder: string;
     }>(
-      `SELECT p.provider_idempotency_key, t.full_name, t.email, p.amount_cents, p.currency
+      `SELECT p.provider_idempotency_key, t.full_name, t.email, p.amount_cents, p.currency,
+              COALESCE(t.payout_details->>'method', '')        AS payout_method,
+              COALESCE(t.payout_details->>'value', '')         AS payout_value,
+              COALESCE(t.payout_details->>'accountHolder', '') AS account_holder
          FROM payout p
          JOIN teacher t ON t.id = p.teacher_id
         WHERE p.batch_id = $1 AND p.status = 'pending'
@@ -170,6 +180,9 @@ export async function exportBatchCsv(pool: ActorPool, batchId: string): Promise<
         csvField(r.email),
         (Number(r.amount_cents) / 100).toFixed(2),
         r.currency.trim(),
+        csvField(r.payout_method),
+        csvField(r.payout_value),
+        csvField(r.account_holder),
       ].join(","),
     );
     return [CSV_HEADER, ...lines].join("\n") + "\n";

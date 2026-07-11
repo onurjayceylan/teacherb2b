@@ -1,6 +1,7 @@
 // Stripe webhook ingest'i: (provider, event_id) idempotency insert'i + işleme AYNI transaction'da.
 import Stripe from "stripe";
 import type { ActorPool, Db } from "@teachernow/db";
+import { ingestDisputeEvent, type StripeDisputeInput } from "./chargebacks.js";
 import { ensureAccount, postTxn } from "./ledger.js";
 
 // Yalnız imza doğrulama için; hiçbir API çağrısı yapılmaz.
@@ -18,6 +19,8 @@ export interface StripeEventInput {
   checkoutSessionId?: string;
   /** checkout.session.completed'daki payment_status: 'paid' | 'unpaid' | 'no_payment_required'. */
   paymentStatus?: string;
+  /** charge.dispute.* event'lerinde dispute özeti (route event.data.object'ten çıkarır). */
+  dispute?: StripeDisputeInput;
 }
 
 export interface StripeEventResult {
@@ -146,6 +149,27 @@ export async function processStripeEvent(
       const { settled } = await settleTopup(db, topup);
       await markWebhook(db, webhookId, "processed");
       return settled ? { duplicate: false, settledTopupId: topup.id } : { duplicate: false };
+    }
+
+    if (
+      evt.type === "charge.dispute.created" ||
+      evt.type === "charge.dispute.updated" ||
+      evt.type === "charge.dispute.closed"
+    ) {
+      // Kart itirazı: PARA HAREKETİ YOK — yalnız chargeback_event kaydı + audit + alarm
+      // (0014). Dispute özeti gelmemişse işlenecek bir şey yok: skipped.
+      if (!evt.dispute) {
+        await markWebhook(db, webhookId, "skipped");
+        return { duplicate: false };
+      }
+      await ingestDisputeEvent(db, {
+        eventId: evt.id,
+        eventType: evt.type,
+        ...(evt.paymentIntentId ? { paymentIntentId: evt.paymentIntentId } : {}),
+        dispute: evt.dispute,
+      });
+      await markWebhook(db, webhookId, "processed");
+      return { duplicate: false };
     }
 
     await markWebhook(db, webhookId, "skipped");
