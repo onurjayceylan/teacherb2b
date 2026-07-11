@@ -5,6 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { adminSettleBankTopup } from "@teachernow/billing";
 import { getSlotForUpdate, materializePlans, offerNext } from "@teachernow/dispatch";
 import { isPaymentsFrozen, setPaymentsFrozen } from "@teachernow/ledger";
+import { resolveDispute } from "@teachernow/sessions";
 import { platformProcedure, router } from "../trpc";
 
 export const adminRouter = router({
@@ -317,5 +318,72 @@ export const adminRouter = router({
         }
         return { ok: true as const, teacherId: next.teacherId, token: next.token };
       });
+    }),
+
+  // ---- İtirazlar (S4) ----
+
+  // Açık itirazlar: karar kuyruğu. Okul adı + ders bağlamı + tutar (iade kararı için).
+  listDisputes: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        id: string;
+        session_id: string;
+        reason: string;
+        created_at: Date;
+        school_name: string;
+        class_name: string;
+        occurrence_key: string;
+        dosage_min: number | null;
+        price_cents: string;
+      }>(
+        `SELECT d.id, d.session_id, d.reason, d.created_at,
+                sch.name AS school_name, cg.name AS class_name,
+                s.occurrence_key::text AS occurrence_key, cs.dosage_min, s.price_cents
+           FROM session_dispute d
+           JOIN school sch ON sch.id = d.school_id
+           JOIN class_session cs ON cs.id = d.session_id
+           JOIN booking_slot s ON s.id = cs.slot_id
+           JOIN class_group cg ON cg.id = cs.class_group_id
+          WHERE d.status = 'open'
+          ORDER BY d.created_at`,
+      );
+      return res.rows.map((r) => ({
+        id: r.id,
+        sessionId: r.session_id,
+        reason: r.reason,
+        createdAt: r.created_at,
+        schoolName: r.school_name,
+        className: r.class_name,
+        lessonDate: r.occurrence_key,
+        dosageMin: r.dosage_min,
+        priceCents: Number(r.price_cents),
+      }));
+    });
+  }),
+
+  // Karar Faz-1'de insanda: refund daima ters kayıtla (modül resolveDispute kendi
+  // withPlatform tx'ini açar — pool verilir).
+  resolveDispute: platformProcedure
+    .input(
+      z.object({
+        disputeId: z.string().uuid(),
+        decision: z.enum(["rejected", "refund"]),
+        note: z.string().trim().min(2).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      try {
+        await resolveDispute(ctx.pool, {
+          disputeId: input.disputeId,
+          decision: input.decision,
+          note: input.note,
+        });
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return { disputeId: input.disputeId, decision: input.decision };
     }),
 });

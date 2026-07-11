@@ -1,0 +1,248 @@
+"use client";
+
+// Eğitmen ders odası (public, token'lı): token URL'de taşınır, tüm yetki sunucuda
+// (session.* uçları token'ı her istekte doğrular). Login yok.
+// Öğrenciler MASKELİ adla gelir ("Ad S."); okulun ödediği fiyat sunucudan hiç gelmez.
+import { useCallback, useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { errorMessage, formatCents, trpc } from "../../../lib/trpc";
+
+interface RosterEntry {
+  studentId: string;
+  name: string;
+  present: boolean | null;
+}
+
+interface Room {
+  slotStatus: string;
+  sessionStatus: "not_started" | "created" | "started" | "ended" | "settled" | string;
+  className: string;
+  teacherName: string;
+  timezone: string;
+  startsAt: Date;
+  endsAt: Date;
+  startsAtLocal: string;
+  durationMin: number;
+  dosageMin: number | null;
+  teacherPayCents: number;
+  roster: RosterEntry[];
+}
+
+export default function DersPage() {
+  const params = useParams<{ token: string }>();
+  const token = params?.token ?? "";
+
+  const [room, setRoom] = useState<Room | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [checks, setChecks] = useState<Record<string, boolean>>({});
+  const [finished, setFinished] = useState<{ dosageMin: number } | null>(null);
+
+  const load = useCallback(async () => {
+    if (!token) return;
+    setLoadError(null);
+    try {
+      const r = await trpc.session.getRoom.query({ token });
+      setRoom(r);
+      // Checklist ön dolumu: işaretlenmişse DB'deki değer, değilse varsayılan "geldi".
+      const next: Record<string, boolean> = {};
+      for (const s of r.roster) next[s.studentId] = s.present ?? true;
+      setChecks(next);
+    } catch (err) {
+      setRoom(null);
+      setLoadError(errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function run(action: () => Promise<unknown>, successMsg: string | null) {
+    setBusy(true);
+    setActionError(null);
+    setNotice(null);
+    try {
+      await action();
+      if (successMsg) setNotice(successMsg);
+      await load();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function saveAttendance() {
+    if (!room || room.roster.length === 0) return;
+    void run(async () => {
+      await trpc.session.mark.mutate({
+        token,
+        entries: room.roster.map((s) => ({
+          studentId: s.studentId,
+          present: checks[s.studentId] ?? true,
+        })),
+      });
+    }, "Yoklama kaydedildi.");
+  }
+
+  function finishLesson() {
+    if (!window.confirm("Dersi bitirmek istediğinize emin misiniz? Süre kesinleşir ve ödemeniz işlenir.")) {
+      return;
+    }
+    void run(async () => {
+      const res = await trpc.session.finish.mutate({ token });
+      setFinished({ dosageMin: res.dosageMin });
+    }, null);
+  }
+
+  if (loading) return <main className="muted">Yükleniyor…</main>;
+
+  if (!room) {
+    return (
+      <main>
+        <h1>Ders odası</h1>
+        <div className="card">
+          <p className="muted">
+            Bu ders bağlantısı kullanılamıyor: geçersiz, süresi dolmuş ya da ders ataması
+            değişmiş olabilir.
+          </p>
+          {loadError ? <p className="muted">Ayrıntı: {loadError}</p> : null}
+        </div>
+      </main>
+    );
+  }
+
+  const started = room.sessionStatus === "started";
+  const done = room.sessionStatus === "ended" || room.sessionStatus === "settled";
+  const notStarted = !started && !done;
+
+  return (
+    <main>
+      <h1>
+        {room.className} — ders odası
+      </h1>
+      <p className="muted">
+        Merhaba {room.teacherName}. {room.startsAtLocal}{" "}
+        <span className="muted">({room.timezone} saatiyle)</span> · {room.durationMin} dk ·
+        ücretiniz <strong>{formatCents(room.teacherPayCents)}</strong>
+      </p>
+
+      {actionError ? <p className="error">{actionError}</p> : null}
+      {notice ? <p className="success">{notice}</p> : null}
+
+      {finished ? (
+        <div className="card">
+          <p className="success">
+            Ders kaydedildi: {finished.dosageMin} dk. Ödemeniz hesabınıza işlendi.
+          </p>
+        </div>
+      ) : null}
+
+      {notStarted ? (
+        <div className="card">
+          <h2>Ders henüz başlamadı</h2>
+          <p className="muted">
+            Derse başladığınızda süre saymaya başlar; bitirdiğinizde ödemeniz otomatik işlenir.
+          </p>
+          <button
+            disabled={busy}
+            onClick={() =>
+              void run(() => trpc.session.start.mutate({ token }), "Ders başladı — kolay gelsin!")
+            }
+          >
+            Dersi başlat
+          </button>
+        </div>
+      ) : null}
+
+      {started || done ? (
+        <div className="card">
+          <h2>Yoklama</h2>
+          {room.roster.length === 0 ? (
+            <p className="muted">Bu sınıfta kayıtlı öğrenci yok.</p>
+          ) : done ? (
+            <table>
+              <thead>
+                <tr>
+                  <th>Öğrenci</th>
+                  <th>Durum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {room.roster.map((s) => (
+                  <tr key={s.studentId}>
+                    <td>{s.name}</td>
+                    <td>
+                      {s.present === null ? (
+                        <span className="muted">işaretlenmedi</span>
+                      ) : s.present ? (
+                        <span className="badge ok">geldi</span>
+                      ) : (
+                        <span className="badge warn">gelmedi</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <>
+              <p className="muted">Derse katılan öğrencileri işaretleyin.</p>
+              <ul style={{ listStyle: "none", padding: 0 }}>
+                {room.roster.map((s) => (
+                  <li key={s.studentId} style={{ marginBottom: "0.35rem" }}>
+                    <label>
+                      <input
+                        type="checkbox"
+                        style={{ width: "auto", marginRight: "0.5rem" }}
+                        checked={checks[s.studentId] ?? true}
+                        onChange={(e) =>
+                          setChecks({ ...checks, [s.studentId]: e.target.checked })
+                        }
+                      />
+                      {s.name}
+                      {s.present !== null ? (
+                        <span className="muted"> (kayıtlı: {s.present ? "geldi" : "gelmedi"})</span>
+                      ) : null}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              <button className="secondary" disabled={busy} onClick={saveAttendance}>
+                Yoklamayı kaydet
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+
+      {started ? (
+        <div className="card">
+          <h2>Dersi bitir</h2>
+          <p className="muted">
+            Bitirdiğinizde ders süresi (dosaj) kesinleşir ve ücretiniz hesabınıza işlenir.
+          </p>
+          <button disabled={busy} onClick={finishLesson}>
+            Dersi bitir
+          </button>
+        </div>
+      ) : null}
+
+      {done && !finished ? (
+        <div className="card">
+          <h2>Ders tamamlandı</h2>
+          <p className="success">
+            Ders kaydedildi: {room.dosageMin ?? room.durationMin} dk.
+            {room.sessionStatus === "settled" ? " Ödemeniz hesabınıza işlendi." : ""}
+          </p>
+        </div>
+      ) : null}
+    </main>
+  );
+}

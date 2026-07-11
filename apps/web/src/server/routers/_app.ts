@@ -8,7 +8,9 @@ import { offerRouter } from "./offer";
 import { onboardingRouter } from "./onboarding";
 import { rosterRouter } from "./roster";
 import { scheduleRouter } from "./schedule";
+import { sessionRouter } from "./session";
 import { teacherOnboardingRouter } from "./teacher-onboarding";
+import { teacherPortalRouter } from "./teacher-portal";
 import { topupRouter } from "./topup";
 import { walletRouter } from "./wallet";
 
@@ -24,6 +26,8 @@ export const appRouter = router({
   lessons: lessonsRouter,
   schedule: scheduleRouter,
   offer: offerRouter,
+  session: sessionRouter,
+  teacherPortal: teacherPortalRouter,
 });
 
 export type AppRouter = typeof appRouter;

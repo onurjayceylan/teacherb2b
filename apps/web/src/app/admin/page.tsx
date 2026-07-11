@@ -68,6 +68,18 @@ interface PoolPricing {
 
 const EMPTY_PRICING = { poolId: "", sellUsd: "", payUsd: "", minutes: "" };
 
+interface Dispute {
+  id: string;
+  sessionId: string;
+  reason: string;
+  createdAt: Date;
+  schoolName: string;
+  className: string;
+  lessonDate: string;
+  dosageMin: number | null;
+  priceCents: number;
+}
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingTopup[]>([]);
   const [accounts, setAccounts] = useState<AdminBankAccount[]>([]);
@@ -83,12 +95,13 @@ export default function AdminPage() {
   const [lesson, setLesson] = useState(EMPTY_LESSON);
   const [poolPricing, setPoolPricing] = useState<PoolPricing[]>([]);
   const [pricing, setPricing] = useState(EMPTY_PRICING);
+  const [disputes, setDisputes] = useState<Dispute[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [pendingRes, accountsRes, frozenRes, schoolsRes, teachersRes, poolsRes] =
+      const [pendingRes, accountsRes, frozenRes, schoolsRes, teachersRes, poolsRes, disputesRes] =
         await Promise.all([
           trpc.admin.listPendingTopups.query(),
           trpc.admin.listBankAccounts.query(),
@@ -96,6 +109,7 @@ export default function AdminPage() {
           trpc.lessons.listSchools.query(),
           trpc.lessons.listActiveTeachers.query(),
           trpc.admin.listPoolPricing.query(),
+          trpc.admin.listDisputes.query(),
         ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
@@ -103,6 +117,7 @@ export default function AdminPage() {
       setSchools(schoolsRes);
       setTeachers(teachersRes);
       setPoolPricing(poolsRes);
+      setDisputes(disputesRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -458,6 +473,88 @@ export default function AdminPage() {
             Fiyatı güncelle
           </button>
         </form>
+      </div>
+
+      <div className="card">
+        <h2>İtirazlar</h2>
+        <p className="muted">
+          Okul itirazları: karar Faz-1&apos;de insanda. İade daima ters ledger kaydıyla yapılır
+          (tarihçe değişmez).
+        </p>
+        {disputes.length === 0 ? (
+          <p className="muted">Açık itiraz yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Okul</th>
+                  <th>Ders</th>
+                  <th>Tutar</th>
+                  <th>Gerekçe</th>
+                  <th>Tarih</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {disputes.map((d) => (
+                  <tr key={d.id}>
+                    <td>{d.schoolName}</td>
+                    <td>
+                      {d.className} — {d.lessonDate}
+                      {d.dosageMin !== null ? ` (${d.dosageMin} dk)` : ""}
+                    </td>
+                    <td>{formatCents(d.priceCents)}</td>
+                    <td style={{ maxWidth: "16rem" }}>{d.reason}</td>
+                    <td>{new Date(d.createdAt).toLocaleString("tr-TR")}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: "0.35rem" }}>
+                        <button
+                          disabled={busy}
+                          onClick={() => {
+                            const note = window.prompt("İade karar notu:", "itiraz haklı — iade");
+                            if (!note) return;
+                            void run(
+                              () =>
+                                trpc.admin.resolveDispute.mutate({
+                                  disputeId: d.id,
+                                  decision: "refund",
+                                  note,
+                                }),
+                              "İtiraz sonuçlandı — tutar okula iade edildi",
+                            );
+                          }}
+                        >
+                          İade et
+                        </button>
+                        <button
+                          className="secondary"
+                          style={{ marginTop: 0 }}
+                          disabled={busy}
+                          onClick={() => {
+                            const note = window.prompt("Ret karar notu:", "kayıtlar dersi doğruluyor");
+                            if (!note) return;
+                            void run(
+                              () =>
+                                trpc.admin.resolveDispute.mutate({
+                                  disputeId: d.id,
+                                  decision: "rejected",
+                                  note,
+                                }),
+                              "İtiraz reddedildi",
+                            );
+                          }}
+                        >
+                          Reddet
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">

@@ -17,6 +17,12 @@ interface Balance {
   currency: string;
 }
 
+interface Runway {
+  committedCents: number;
+  weeklyAvgCents: number;
+  weeks: number | null;
+}
+
 interface BankAccount {
   id: string;
   label: string;
@@ -36,6 +42,7 @@ interface BankRef {
 export default function OkulPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [balance, setBalance] = useState<Balance | null>(null);
+  const [runway, setRunway] = useState<Runway | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,11 +64,13 @@ export default function OkulPage() {
       const meData = await trpc.me.get.query();
       setMe(meData);
       if (meData.schools.length > 0) {
-        const [bal, accounts] = await Promise.all([
+        const [bal, rw, accounts] = await Promise.all([
           trpc.wallet.balance.query(),
+          trpc.wallet.runway.query(),
           trpc.topup.listBankAccounts.query(),
         ]);
         setBalance(bal);
+        setRunway(rw);
         setBankAccounts(accounts);
       }
     } catch (err) {
@@ -199,6 +208,14 @@ export default function OkulPage() {
           {balance ? formatCents(balance.balanceCents, balance.currency) : "—"}
         </p>
         <p className="muted">Bakiye yalnız kesinleşmiş (settle edilmiş) yüklemeleri içerir.</p>
+        {runway && runway.weeks !== null ? (
+          // Runway: önümüzdeki 28 günün taahhüdü (tutarları zaten rezervde) + serbest bakiye,
+          // haftalık ortalamaya bölünür. Haftalık taahhüt yoksa gösterge gizli.
+          <p className="muted">
+            Bakiye + mevcut rezervlerle yaklaşık <strong>{runway.weeks} hafta</strong> taahhüt
+            karşılanıyor (önümüzdeki 28 günde {formatCents(runway.committedCents)} planlı ders).
+          </p>
+        ) : null}
       </div>
 
       <div className="card">

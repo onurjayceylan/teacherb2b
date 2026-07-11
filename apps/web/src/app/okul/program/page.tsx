@@ -49,7 +49,23 @@ interface Slot {
   schoolTz: string;
   teacherName: string | null;
   offerPending: boolean;
+  sessionId: string | null;
+  sessionStatus: string | null;
+  dosageMin: number | null;
+  settled: boolean;
 }
+
+interface JoinLinks {
+  teacherUrl: string;
+  classUrl: string;
+}
+
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  created: "oda açıldı",
+  started: "ders sürüyor",
+  ended: "ders bitti",
+  settled: "tamamlandı (ödendi)",
+};
 
 const WEEKDAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
 
@@ -121,6 +137,8 @@ export default function ProgramPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [skipDate, setSkipDate] = useState("");
   const [skipReason, setSkipReason] = useState("");
+  // Üretilen katılım linkleri slot bazında gösterilir; ham token yalnız bu state'te yaşar.
+  const [joinLinks, setJoinLinks] = useState<Record<string, JoinLinks>>({});
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -226,6 +244,26 @@ export default function ProgramPage() {
           ? "Ders iptal edildi — tutar cüzdanınıza tam iade edildi."
           : "Ders iptal edildi — geç iptal: tutarın %50'si iade edildi.",
       );
+    }, null);
+  }
+
+  function fetchJoinLinks(slot: Slot) {
+    void run(async () => {
+      const links = await trpc.schedule.joinLinks.mutate({ slotId: slot.id });
+      setJoinLinks((prev) => ({ ...prev, [slot.id]: links }));
+      setNotice("Katılım linkleri üretildi — kopyalayıp eğitmene/sınıfa iletin.");
+    }, null);
+  }
+
+  function openDispute(slot: Slot) {
+    if (!slot.sessionId) return;
+    const reason = window.prompt(
+      "İtiraz gerekçenizi yazın (örn. ders yapılmadı, süre hatalı):",
+    );
+    if (!reason || reason.trim().length < 3) return;
+    void run(async () => {
+      await trpc.schedule.openDispute.mutate({ sessionId: slot.sessionId!, reason: reason.trim() });
+      setNotice("İtirazınız alındı — platform ekibi inceleyip sonucu bildirecek.");
     }, null);
   }
 
@@ -510,12 +548,14 @@ export default function ProgramPage() {
                     <th>Yerel saat</th>
                     <th>Durum</th>
                     <th>Eğitmen</th>
+                    <th>Ders</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {slots.map((s) => {
                     const st = SLOT_STATUS[s.status] ?? { label: s.status, ok: false };
+                    const links = joinLinks[s.id];
                     return (
                       <tr key={s.id}>
                         <td>{s.occurrenceKey}</td>
@@ -531,15 +571,65 @@ export default function ProgramPage() {
                           )}
                         </td>
                         <td>
-                          {s.status === "scheduled" ? (
-                            <button
-                              className="secondary"
-                              style={{ marginTop: 0 }}
-                              disabled={busy}
-                              onClick={() => cancelSlot(s)}
+                          {s.sessionStatus ? (
+                            <span className={`badge ${s.settled ? "ok" : "warn"}`}>
+                              {SESSION_STATUS_LABELS[s.sessionStatus] ?? s.sessionStatus}
+                              {s.dosageMin !== null ? ` · ${s.dosageMin} dk` : ""}
+                            </span>
+                          ) : (
+                            <span className="muted">—</span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                            {s.status === "scheduled" && s.teacherName ? (
+                              <button
+                                className="secondary"
+                                style={{ marginTop: 0 }}
+                                disabled={busy}
+                                onClick={() => fetchJoinLinks(s)}
+                              >
+                                Linkler
+                              </button>
+                            ) : null}
+                            {s.status === "scheduled" ? (
+                              <button
+                                className="secondary"
+                                style={{ marginTop: 0 }}
+                                disabled={busy}
+                                onClick={() => cancelSlot(s)}
+                              >
+                                İptal
+                              </button>
+                            ) : null}
+                            {s.sessionId && s.settled ? (
+                              <button
+                                className="secondary"
+                                style={{ marginTop: 0 }}
+                                disabled={busy}
+                                onClick={() => openDispute(s)}
+                              >
+                                İtiraz et
+                              </button>
+                            ) : null}
+                          </div>
+                          {links ? (
+                            <div
+                              className="mono"
+                              style={{
+                                marginTop: "0.35rem",
+                                maxWidth: "24rem",
+                                wordBreak: "break-all",
+                                fontSize: "0.75rem",
+                              }}
                             >
-                              İptal
-                            </button>
+                              <div>
+                                Eğitmen: <span style={{ userSelect: "all" }}>{links.teacherUrl}</span>
+                              </div>
+                              <div>
+                                Sınıf: <span style={{ userSelect: "all" }}>{links.classUrl}</span>
+                              </div>
+                            </div>
                           ) : null}
                         </td>
                       </tr>

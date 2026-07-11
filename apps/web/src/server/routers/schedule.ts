@@ -7,7 +7,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { cancelBySchool, materializePlans } from "@teachernow/dispatch";
+import { openDispute } from "@teachernow/sessions";
 import { router, schoolProcedure } from "../trpc";
+import { buildJoinUrl } from "./teacher-portal";
 
 const dateSchema = z
   .string()
@@ -180,6 +182,7 @@ export const scheduleRouter = router({
   // Slotlar + atanmış eğitmenin YALNIZ adı. Slot okuması okul bağlamında (RLS + kolon
   // grant'i teacher_pay/hold kolonlarını dışarıda tutar); confirmed atamanın eğitmen adı
   // platform bağlamında join'lenir — iletişim/maliyet alanı asla dönmez.
+  // Ders (session) durumu okul bağlamında join'lenir: okul kendi satırlarını okuyabilir.
   listSlots: schoolProcedure
     .input(z.object({ planId: z.string().uuid().optional() }).optional())
     .query(async ({ ctx, input }) => {
@@ -194,13 +197,18 @@ export const scheduleRouter = router({
           status: string;
           class_name: string | null;
           school_tz: string;
+          session_id: string | null;
+          session_status: string | null;
+          dosage_min: number | null;
         }>(
           `SELECT s.id, s.plan_id, s.occurrence_key::text AS occurrence_key,
                   s.starts_at, s.ends_at, s.price_cents, s.status,
-                  cg.name AS class_name, p.school_tz
+                  cg.name AS class_name, p.school_tz,
+                  cs.id AS session_id, cs.status AS session_status, cs.dosage_min
              FROM booking_slot s
              JOIN dosage_plan p ON p.id = s.plan_id
              LEFT JOIN class_group cg ON cg.id = s.class_group_id
+             LEFT JOIN class_session cs ON cs.slot_id = s.id
             WHERE ($1::uuid IS NULL OR s.plan_id = $1)
             ORDER BY s.starts_at`,
           [input?.planId ?? null],
@@ -242,7 +250,91 @@ export const scheduleRouter = router({
         // Yalnız onaylanmış atamanın eğitmen ADI; teklif aşamasında ad sızdırılmaz.
         teacherName: confirmedName.get(s.id) ?? null,
         offerPending: offered.has(s.id),
+        sessionId: s.session_id,
+        sessionStatus: s.session_status,
+        dosageMin: s.dosage_min,
+        settled: s.session_status === "settled",
       }));
+    }),
+
+  // Ders katılım linkleri: yalnız onaylı atamalı scheduled slot için üretilir.
+  // Sahiplik okul bağlamında (RLS'li SELECT), atama kontrolü platform bağlamında.
+  // Token exp = ders bitişi + 2 saat; ham token yalnız dönen URL'lerde yaşar.
+  joinLinks: schoolProcedure
+    .input(z.object({ slotId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const slot = await ctx.withSchoolDb(async (db) => {
+        const res = await db.query<{ id: string; ends_at: Date; status: string }>(
+          "SELECT id, ends_at, status FROM booking_slot WHERE id = $1",
+          [input.slotId],
+        );
+        return res.rows[0] ?? null;
+      });
+      if (!slot) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "slot bulunamadı" });
+      }
+      if (slot.status !== "scheduled") {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `yalnız planlanmış ders için link üretilebilir (durum: ${slot.status})`,
+        });
+      }
+      const confirmed = await ctx.pool.withPlatform(async (db) => {
+        const res = await db.query(
+          "SELECT 1 FROM assignment WHERE slot_id = $1 AND status = 'confirmed'",
+          [slot.id],
+        );
+        return (res.rowCount ?? 0) > 0;
+      });
+      if (!confirmed) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: "slotta onaylı eğitmen ataması yok — önce atama tamamlanmalı",
+        });
+      }
+      return {
+        teacherUrl: buildJoinUrl(slot.id, "teacher", slot.ends_at),
+        classUrl: buildJoinUrl(slot.id, "class", slot.ends_at),
+      };
+    }),
+
+  // Okul itirazı: session sahipliği OKUL bağlamında doğrulanır (RLS: okul yalnız kendi
+  // satırını görür), kayıt platform tx'inde açılır. Karar Faz-1'de insanda (admin).
+  openDispute: schoolProcedure
+    .input(
+      z.object({
+        sessionId: z.string().uuid(),
+        reason: z.string().trim().min(3).max(1000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const owned = await ctx.withSchoolDb(async (db) => {
+        const res = await db.query<{ id: string }>(
+          "SELECT id FROM class_session WHERE id = $1",
+          [input.sessionId],
+        );
+        return res.rows.length > 0;
+      });
+      if (!owned) {
+        throw new TRPCError({ code: "NOT_FOUND", message: "ders oturumu bulunamadı" });
+      }
+      try {
+        const disputeId = await ctx.pool.withPlatform(async (db) =>
+          openDispute(db, {
+            sessionId: input.sessionId,
+            schoolId: ctx.activeSchoolId,
+            reason: input.reason,
+            createdBy: ctx.actor.userId,
+          }),
+        );
+        return { disputeId };
+      } catch (err) {
+        if (err instanceof TRPCError) throw err;
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }),
 
   // Okul iptali: slot aktif okula mı ait (okul bağlamında RLS'li SELECT) → matris uygular.
