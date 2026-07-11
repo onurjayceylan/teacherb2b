@@ -6,17 +6,28 @@
 import { useEffect, useState } from "react";
 import { errorMessage, formatCents, trpc } from "../../../lib/trpc";
 
+interface FunnelDuration {
+  fromAction: string;
+  toAction: string;
+  schoolCount: number;
+  medianHours: number | null;
+}
+
 interface Metrics {
   activation: {
     schoolCount: number;
     medianDaysToFirstTopup: number | null;
     medianDaysToFirstSettledLesson: number | null;
     funnel: { action: string; schools: number; events: number }[];
+    funnelDurations: FunnelDuration[];
   };
   dosage: {
     windowDays: number;
     slotCounts: Record<string, number>;
     realizationRate: number | null;
+    plannedMinutes: number;
+    settledMinutes: number;
+    minuteRealizationRate: number | null;
   };
   backfill: { slaEscalatedCount: number; reofferCount: number };
   money: {
@@ -25,6 +36,8 @@ interface Metrics {
     disputeCount: number;
     disputeRate: number | null;
     repeatTopupSchools: number;
+    fundedSchools: number;
+    repeatTopupRate: number | null;
   };
   teachers: {
     activeCount: number;
@@ -68,6 +81,13 @@ function pct(value: number | null): string {
 
 function days(value: number | null): string {
   return value === null ? "—" : `${value.toFixed(1)} gün`;
+}
+
+/** Medyan saat değeri okunur biçimde: <48 sa "X sa", üstü "X gün". */
+function hours(value: number | null): string {
+  if (value === null) return "—";
+  if (value < 48) return `${value.toFixed(1)} sa`;
+  return `${(value / 24).toFixed(1)} gün`;
 }
 
 /** Eşik rozeti: ok=true yeşil, ok=false kırmızı, ok=null gri (veri yok). */
@@ -197,6 +217,33 @@ export default function MetriklerPage() {
             ))}
           </tbody>
         </table>
+
+        <h2 style={{ marginTop: "1rem" }}>Funnel adım geçiş süreleri (medyan)</h2>
+        <p className="muted">
+          Okul başına adımın İLK olayı esas alınır; medyan yalnız iki adımı da yaşamış okullar
+          üzerinden hesaplanır.
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Geçiş</th>
+              <th>Medyan süre</th>
+              <th>Okul</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activation.funnelDurations.map((d) => (
+              <tr key={`${d.fromAction}->${d.toAction}`}>
+                <td>
+                  {(FUNNEL_LABELS[d.fromAction] ?? d.fromAction).replace(/^\d+\. /, "")} →{" "}
+                  {(FUNNEL_LABELS[d.toAction] ?? d.toAction).replace(/^\d+\. /, "")}
+                </td>
+                <td>{hours(d.medianHours)}</td>
+                <td>{d.schoolCount}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       <div className="card">
@@ -216,12 +263,24 @@ export default function MetriklerPage() {
           </table>
         )}
         <p style={{ marginTop: "0.75rem" }}>
-          Gerçekleşme oranı:{" "}
+          Gerçekleşme oranı (ders sayısı):{" "}
           <Gauge ok={dosage.realizationRate === null ? null : dosage.realizationRate >= 0.9}>
             {pct(dosage.realizationRate)}
           </Gauge>{" "}
           <span className="muted">
             tamamlanan / (tamamlanan + eskalasyon + gelmedi) — hedef ≥ %90
+          </span>
+        </p>
+        <p>
+          Gerçekleşme (dakika bazında):{" "}
+          <Gauge
+            ok={dosage.minuteRealizationRate === null ? null : dosage.minuteRealizationRate >= 0.9}
+          >
+            {pct(dosage.minuteRealizationRate)}
+          </Gauge>{" "}
+          <span className="muted">
+            settle edilmiş {dosage.settledMinutes} dk / planlanan {dosage.plannedMinutes} dk —
+            kısa biten ders sayım oranında görünmez, burada görünür
           </span>
         </p>
       </div>
@@ -266,8 +325,15 @@ export default function MetriklerPage() {
               </td>
             </tr>
             <tr>
-              <th>Tekrar yükleme yapan okul (≥2 settled top-up)</th>
-              <td>{money.repeatTopupSchools} okul</td>
+              <th>Tekrar yükleme oranı (≥2 settled top-up)</th>
+              <td>
+                <Gauge ok={money.repeatTopupRate === null ? null : money.repeatTopupRate >= 0.5}>
+                  {pct(money.repeatTopupRate)}
+                </Gauge>{" "}
+                <span className="muted">
+                  {money.repeatTopupSchools} / {money.fundedSchools} yükleme yapmış okul
+                </span>
+              </td>
             </tr>
           </tbody>
         </table>

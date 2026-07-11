@@ -129,6 +129,30 @@ interface SettleReview {
   reason: string | null;
 }
 
+interface WorkerHealth {
+  job: string;
+  lastRunAt: Date | null;
+  stale: boolean;
+}
+
+interface HealthStrip {
+  todayLessonCount: number;
+  liveLessonCount: number;
+  oldestPendingTopupDays: number | null;
+  failedPayoutCount: number;
+  pendingNotificationCount: number;
+  workers: WorkerHealth[];
+}
+
+/** "3 sa önce" tarzı kısa görece zaman (sağlık şeridi worker rozeti). */
+function timeAgo(at: Date): string {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(at).getTime()) / 60_000));
+  if (mins < 60) return `${mins} dk önce`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours} sa önce`;
+  return `${Math.round(hours / 24)} gün önce`;
+}
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingTopup[]>([]);
   const [accounts, setAccounts] = useState<AdminBankAccount[]>([]);
@@ -150,6 +174,7 @@ export default function AdminPage() {
   const [openOffers, setOpenOffers] = useState<OpenOffer[]>([]);
   const [offerLinks, setOfferLinks] = useState<Record<string, OfferLink>>({});
   const [settleReviews, setSettleReviews] = useState<SettleReview[]>([]);
+  const [health, setHealth] = useState<HealthStrip | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -167,6 +192,7 @@ export default function AdminPage() {
         pendingNotifRes,
         openOffersRes,
         settleReviewsRes,
+        healthRes,
       ] = await Promise.all([
         trpc.admin.listPendingTopups.query(),
         trpc.admin.listBankAccounts.query(),
@@ -179,6 +205,7 @@ export default function AdminPage() {
         trpc.admin.pendingNotificationCount.query(),
         trpc.admin.listOpenOffers.query(),
         trpc.admin.listSettleReviews.query(),
+        trpc.admin.healthStrip.query(),
       ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
@@ -191,6 +218,7 @@ export default function AdminPage() {
       setPendingNotifications(pendingNotifRes.pending);
       setOpenOffers(openOffersRes);
       setSettleReviews(settleReviewsRes);
+      setHealth(healthRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -250,6 +278,64 @@ export default function AdminPage() {
 
       {actionError ? <p className="error">{actionError}</p> : null}
       {notice ? <p className="success">{notice}</p> : null}
+
+      {health ? (
+        <div className="card">
+          <h2>Sağlık şeridi</h2>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+            {[
+              { label: "Bugünkü ders", value: String(health.todayLessonCount), warn: false },
+              { label: "Şu an canlı ders", value: String(health.liveLessonCount), warn: false },
+              {
+                label: "En eski bekleyen havale",
+                value:
+                  health.oldestPendingTopupDays === null
+                    ? "—"
+                    : `${health.oldestPendingTopupDays.toFixed(1)} gün`,
+                warn: (health.oldestPendingTopupDays ?? 0) > 2,
+              },
+              {
+                label: "Başarısız payout",
+                value: String(health.failedPayoutCount),
+                warn: health.failedPayoutCount > 0,
+              },
+              {
+                label: "Bekleyen bildirim",
+                value: String(health.pendingNotificationCount),
+                warn: health.pendingNotificationCount > 20,
+              },
+            ].map((tile) => (
+              <div
+                key={tile.label}
+                style={{
+                  border: "1px solid #e2e6ec",
+                  borderRadius: "8px",
+                  padding: "0.5rem 0.9rem",
+                  minWidth: "9rem",
+                }}
+              >
+                <div className="muted" style={{ fontSize: "0.75rem" }}>
+                  {tile.label}
+                </div>
+                <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
+                  {tile.warn ? <span className="badge warn">{tile.value}</span> : tile.value}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.75rem" }}>
+            {health.workers.map((w) => (
+              <span key={w.job} className={`badge ${w.stale ? "warn" : "ok"}`}>
+                {w.job}: {w.lastRunAt ? timeAgo(w.lastRunAt) : "hiç koşmadı"}
+              </span>
+            ))}
+          </div>
+          <p className="muted" style={{ marginTop: "0.5rem" }}>
+            Kırmızı worker rozeti: heartbeat eşik süresinden eski (cron aralığı + pay) — worker
+            loglarına bakın.
+          </p>
+        </div>
+      ) : null}
 
       <div className="card">
         <h2>Bekleyen teklifler</h2>

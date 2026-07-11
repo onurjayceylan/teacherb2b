@@ -12,6 +12,7 @@ interface StatementRow {
   createdAt: Date;
   kind: string;
   label: string;
+  description: string;
   amountCents: number;
   currency: string;
   balanceCents: number;
@@ -41,6 +42,46 @@ function monthToRange(month: string): { from: string; to: string } | null {
 function currentMonth(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** CSV alanı: ayraç/tırnak/yeni satır içeriyorsa RFC-4180 tırnaklama. */
+function csvField(value: string): string {
+  return /[";\n\r]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
+
+/**
+ * Ekstre CSV'si (client-side blob — sunucu ucu gerekmez): ayraç ';' (Türkçe Excel
+ * varsayılanı), başta BOM (Excel'in UTF-8/Türkçe karakterleri doğru açması için).
+ */
+function buildStatementCsv(statement: Statement): string {
+  const lines = ["Tarih;Açıklama;Tür;Tutar;Para birimi;Bakiye"];
+  for (const r of statement.rows) {
+    lines.push(
+      [
+        new Date(r.createdAt).toLocaleString("tr-TR"),
+        r.description,
+        r.label,
+        (r.amountCents / 100).toFixed(2),
+        r.currency,
+        (r.balanceCents / 100).toFixed(2),
+      ]
+        .map(csvField)
+        .join(";"),
+    );
+  }
+  return "\uFEFF" + lines.join("\r\n") + "\r\n";
+}
+
+function downloadCsv(statement: Statement, month: string): void {
+  const blob = new Blob([buildStatementCsv(statement)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ekstre-${month}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export default function EkstrePage() {
@@ -142,6 +183,13 @@ export default function EkstrePage() {
 
           <div className="card">
             <h2>Hareketler</h2>
+            {statement.rows.length > 0 ? (
+              <p>
+                <button className="secondary" onClick={() => downloadCsv(statement, month)}>
+                  CSV indir ({statement.rows.length} satır)
+                </button>
+              </p>
+            ) : null}
             {statement.rows.length === 0 ? (
               <p className="muted">Bu dönemde hareket yok.</p>
             ) : (
@@ -150,7 +198,8 @@ export default function EkstrePage() {
                   <thead>
                     <tr>
                       <th>Tarih</th>
-                      <th>İşlem</th>
+                      <th>Açıklama</th>
+                      <th>Tür</th>
                       <th>Tutar</th>
                       <th>Bakiye</th>
                     </tr>
@@ -159,6 +208,7 @@ export default function EkstrePage() {
                     {statement.rows.map((r) => (
                       <tr key={r.id}>
                         <td>{new Date(r.createdAt).toLocaleString("tr-TR")}</td>
+                        <td>{r.description}</td>
                         <td>
                           <span className={`badge ${r.kind === "wallet_hold" ? "warn" : "ok"}`}>
                             {r.label}

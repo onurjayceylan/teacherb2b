@@ -43,3 +43,4 @@ export {
   timezoneSchema,
   type PayoutDetails,
 } from "./profile.js";
+export { requestPortalLink } from "./portal.js";

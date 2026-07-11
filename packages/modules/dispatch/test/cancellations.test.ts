@@ -9,6 +9,7 @@ import {
   materializePlans,
   offerNext,
   teacherDrop,
+  teacherDropByTeacher,
   teacherNoShow,
 } from "../src/index.js";
 import {
@@ -345,6 +346,81 @@ describe("teacherDrop", () => {
     expect(await balance(tdb.pool, "school", s.schoolId, "wallet_hold")).toBe(0);
     // Dersi eğitmen KENDİSİ bıraktı → ona 'teacher_slot_cancelled' YAZILMAZ
     expect(await cancelledNotices("drop.solo@example.com")).toEqual([]);
+    await assertInvariantsClean(tdb.pool);
+  });
+});
+
+describe("teacherDropByTeacher", () => {
+  it("kendi dersini bırakır: sahiplik doğrulanır, akış teacherDrop ile aynı (re-offer)", async () => {
+    const s = await scenario({
+      name: "selfdrop_okul",
+      priceCents: 9_000,
+      teacherPayCents: 5_000,
+      topupCents: 9_000,
+      weeks: 1,
+      daysAhead: 7,
+    });
+    const t1 = await seedTeacher(tdb.pool, {
+      email: "selfdrop.t1@example.com",
+      timezone: TZ,
+      poolId: s.poolId,
+      availability: allWeekAvailability(),
+    });
+    const t2 = await seedTeacher(tdb.pool, {
+      email: "selfdrop.t2@example.com",
+      timezone: TZ,
+      poolId: s.poolId,
+      availability: allWeekAvailability(),
+    });
+    const slotId = s.slotIds[0]!;
+    expect(await offerAndAccept(slotId)).toBe(t1);
+
+    const result = await teacherDropByTeacher(tdb.pool, { slotId, teacherId: t1 });
+    expect(result).toEqual({ reoffered: true, teacherId: t2 });
+
+    const state = await slotState(slotId);
+    expect(state.status).toBe("scheduled"); // re-offer bulundu → slot açık kalır
+    expect(state.hold_released_txn_id).toBeNull(); // hold'a dokunulmaz
+    expect(await assignments(slotId)).toEqual([
+      { teacher_id: t1, status: "dropped" },
+      { teacher_id: t2, status: "offered" },
+    ]);
+    await assertInvariantsClean(tdb.pool);
+  });
+
+  it("başkasının dersini BIRAKAMAZ: anlamlı hata, slot/atama/hold aynen kalır", async () => {
+    const s = await scenario({
+      name: "selfdrop_yabanci",
+      priceCents: 9_000,
+      teacherPayCents: 5_000,
+      topupCents: 9_000,
+      weeks: 1,
+      daysAhead: 8,
+    });
+    const owner = await seedTeacher(tdb.pool, {
+      email: "selfdrop.owner@example.com",
+      timezone: TZ,
+      poolId: s.poolId,
+      availability: allWeekAvailability(),
+    });
+    const slotId = s.slotIds[0]!;
+    expect(await offerAndAccept(slotId)).toBe(owner);
+
+    // Havuz dışı başka bir eğitmenin kimliğiyle deneme → eğitmen-yüzlü İngilizce hata
+    const intruder = await seedTeacher(tdb.pool, {
+      email: "selfdrop.intruder@example.com",
+      timezone: TZ,
+    });
+    await expect(
+      teacherDropByTeacher(tdb.pool, { slotId, teacherId: intruder }),
+    ).rejects.toThrow("this lesson is not assigned to you");
+
+    // Hiçbir şey değişmedi: slot scheduled, atama confirmed, hold yerinde
+    const state = await slotState(slotId);
+    expect(state.status).toBe("scheduled");
+    expect(state.hold_released_txn_id).toBeNull();
+    expect(await balance(tdb.pool, "school", s.schoolId, "wallet_hold")).toBe(9_000);
+    expect(await assignments(slotId)).toEqual([{ teacher_id: owner, status: "confirmed" }]);
     await assertInvariantsClean(tdb.pool);
   });
 });

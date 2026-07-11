@@ -97,10 +97,15 @@ export default function TeklifPage() {
             </>
           ) : null}
           {result.kind === "gone" ? (
-            <p className="muted">
-              This offer is no longer valid: it may have expired or the lesson may have been
-              assigned to another teacher. We will reach out as new offers come in.
-            </p>
+            <>
+              <p className="muted">
+                This offer is no longer valid: it may have expired or the lesson may have been
+                assigned to another teacher. We will reach out as new offers come in.
+              </p>
+              <p>
+                <a href="/egitmen/link">Lost your panel link? Request a new one →</a>
+              </p>
+            </>
           ) : null}
         </div>
       </main>
@@ -116,6 +121,9 @@ export default function TeklifPage() {
             This offer link is no longer available: it may have expired, been withdrawn, or the
             lesson may have been assigned to another teacher. We will reach out as new offers
             come in.
+          </p>
+          <p>
+            <a href="/egitmen/link">Lost your panel link? Request a new one →</a>
           </p>
           {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>

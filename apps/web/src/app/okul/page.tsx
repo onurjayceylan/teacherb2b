@@ -39,6 +39,14 @@ interface BankRef {
   referenceCode: string;
 }
 
+interface PendingBankTopup {
+  id: string;
+  amountCents: number;
+  currency: string;
+  referenceCode: string | null;
+  createdAt: Date;
+}
+
 export default function OkulPage() {
   const [me, setMe] = useState<Me | null>(null);
   const [balance, setBalance] = useState<Balance | null>(null);
@@ -56,6 +64,7 @@ export default function OkulPage() {
   const [bankBusy, setBankBusy] = useState(false);
   const [bankError, setBankError] = useState<string | null>(null);
   const [bankRef, setBankRef] = useState<BankRef | null>(null);
+  const [pendingTopups, setPendingTopups] = useState<PendingBankTopup[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -64,14 +73,16 @@ export default function OkulPage() {
       const meData = await trpc.me.get.query();
       setMe(meData);
       if (meData.schools.length > 0) {
-        const [bal, rw, accounts] = await Promise.all([
+        const [bal, rw, accounts, pending] = await Promise.all([
           trpc.wallet.balance.query(),
           trpc.wallet.runway.query(),
           trpc.topup.listBankAccounts.query(),
+          trpc.topup.listPendingBank.query(),
         ]);
         setBalance(bal);
         setRunway(rw);
         setBankAccounts(accounts);
+        setPendingTopups(pending);
       }
     } catch (err) {
       setLoadError(errorMessage(err));
@@ -123,6 +134,8 @@ export default function OkulPage() {
         ...(bankAccountId ? { bankAccountId } : {}),
       });
       setBankRef(res);
+      // Yeni talep bekleyenler listesine anında düşsün (aynı sayfadaki kart).
+      setPendingTopups(await trpc.topup.listPendingBank.query());
     } catch (err) {
       setBankError(errorMessage(err));
     } finally {
@@ -330,6 +343,45 @@ export default function OkulPage() {
             </p>
           </div>
         ) : null}
+      </div>
+
+      <div className="card">
+        <h2>Bekleyen havaleleriniz</h2>
+        {pendingTopups.length === 0 ? (
+          <p className="muted">Bekleyen havale talebi yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Referans kodu</th>
+                  <th>Tutar</th>
+                  <th>Talep tarihi</th>
+                  <th>Durum</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingTopups.map((t) => (
+                  <tr key={t.id}>
+                    <td>
+                      <strong className="mono">{t.referenceCode ?? "—"}</strong>
+                    </td>
+                    <td>{formatCents(t.amountCents, t.currency)}</td>
+                    <td>{new Date(t.createdAt).toLocaleString("tr-TR")}</td>
+                    <td>
+                      <span className="badge warn">onay bekliyor</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="muted">
+          Dekontun açıklama alanına TN- ile başlayan referans kodunu mutlaka yazın — eşleştirme bu
+          kodla yapılır. USD hesabına TL gönderirseniz bankanın uyguladığı kur geçerli olur;
+          bakiyenize geçen tutar kur farkı nedeniyle talep ettiğinizden farklı olabilir.
+        </p>
       </div>
     </main>
   );

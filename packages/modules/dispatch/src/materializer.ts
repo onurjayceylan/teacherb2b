@@ -9,10 +9,20 @@ import { ensureAccount, postTxn, auditSlotAction } from "./ledger.js";
 import { offerNext } from "./matcher.js";
 import type { SlotRow } from "./slots.js";
 
+export interface MaterializeFailedPlan {
+  planId: string;
+  error: string;
+}
+
 export interface MaterializeResult {
   created: number;
   blocked: number;
   skipped: number;
+  /**
+   * Plan-başına yalıtılmış hatalar (geriye uyumlu ekleme: yalnız hata varsa dolu).
+   * blocked_insufficient_funds buraya GİRMEZ — o bir hata değil, beklenen sonuçtur.
+   */
+  failedPlans?: MaterializeFailedPlan[];
 }
 
 export interface MaterializeOptions {
@@ -38,7 +48,12 @@ interface PlanRow {
 /** Planın okul-lokal occurrence tarihlerini (YYYY-MM-DD) üretir; exception'ları düşer. */
 function occurrenceDates(plan: PlanRow, skipDates: ReadonlySet<string>): string[] {
   const start = DateTime.fromISO(plan.start_date, { zone: plan.school_tz });
-  if (!start.isValid) throw new Error(`materializer: geçersiz start_date: ${plan.start_date}`);
+  if (!start.isValid) {
+    // start_date DB'de date kolonu — geçersizlik pratikte bozuk school_tz demektir.
+    throw new Error(
+      `materializer: geçersiz start_date/school_tz: ${plan.start_date} (${plan.school_tz})`,
+    );
+  }
   // start_date'ten itibaren plan.weekday'e denk gelen İLK tarih (ISO: luxon 1..7 → 0..6)
   const offsetDays = (plan.weekday - (start.weekday - 1) + 7) % 7;
   const dates: string[] = [];
@@ -84,19 +99,41 @@ export async function materializePlans(
   });
 
   const result: MaterializeResult = { created: 0, blocked: 0, skipped: 0 };
+  const failedPlans: MaterializeFailedPlan[] = [];
   for (const plan of plans) {
-    const skips = skipsByPlan.get(plan.id) ?? new Set<string>();
-    for (const dateISO of occurrenceDates(plan, skips)) {
-      const window = occurrenceToUtc(dateISO, plan.start_minute, plan.duration_min, plan.school_tz);
-      if (window.startsAt < now || window.startsAt > horizonEnd) continue;
+    // Plan-başına yalıtım: tek planın hatası (bozuk tz, FK, beklenmedik DB hatası)
+    // koşunun kalanını düşürmez. Patlayan occurrence'ın kendi transaction'ı zaten
+    // geri sarıldı; audit izi AYRI transaction'da yazılır ve diğer planlara geçilir.
+    try {
+      const skips = skipsByPlan.get(plan.id) ?? new Set<string>();
+      for (const dateISO of occurrenceDates(plan, skips)) {
+        const window = occurrenceToUtc(
+          dateISO,
+          plan.start_minute,
+          plan.duration_min,
+          plan.school_tz,
+        );
+        if (window.startsAt < now || window.startsAt > horizonEnd) continue;
 
-      // Her occurrence tek transaction: slot + hold + teklif birlikte görünür olur.
-      const outcome = await pool.withPlatform((db) =>
-        materializeOccurrence(db, plan, dateISO, window.startsAt, window.endsAt, now),
+        // Her occurrence tek transaction: slot + hold + teklif birlikte görünür olur.
+        const outcome = await pool.withPlatform((db) =>
+          materializeOccurrence(db, plan, dateISO, window.startsAt, window.endsAt, now),
+        );
+        result[outcome] += 1;
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await pool.withPlatform((db) =>
+        db.query(
+          `INSERT INTO audit_log (actor_kind, school_id, action, entity_type, entity_id, after)
+           VALUES ('system', $1, 'materializer_plan_failed', 'dosage_plan', $2, $3::jsonb)`,
+          [plan.school_id, plan.id, JSON.stringify({ plan_id: plan.id, error: message })],
+        ),
       );
-      result[outcome] += 1;
+      failedPlans.push({ planId: plan.id, error: message });
     }
   }
+  if (failedPlans.length > 0) result.failedPlans = failedPlans;
   return result;
 }
 

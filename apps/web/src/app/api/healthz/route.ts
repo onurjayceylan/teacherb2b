@@ -16,6 +16,7 @@ const WORKER_STALE_AFTER_MS: Record<string, number> = {
   "offer-timeout-sweeper": 15 * 60_000, // 5 dk cron → 15 dk
   "notification-dispatcher": 10 * 60_000, // 2 dk cron → 10 dk
   "backfill-sweeper": 30 * 60_000, // 10 dk cron → 30 dk
+  "external-reconciler": 26 * 60 * 60_000, // günlük cron (P1) → 26 saat
 };
 
 interface WorkerFreshness {

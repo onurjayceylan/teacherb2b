@@ -13,8 +13,26 @@ import { errorMessage, trpc } from "../../../lib/trpc";
 interface ClassStatus {
   className: string;
   startsAt: Date;
+  schoolTz: string;
   started: boolean;
   ended: boolean;
+}
+
+/**
+ * Saatler planın OKUL saat diliminde (denetim P2): sayfa sınıf projeksiyonuna açılır,
+ * tarayıcının dilimi (ör. sunum bilgisayarı UTC'de) yanıltmasın. Geçersiz tz'de
+ * tarayıcı yereline düşer.
+ */
+function formatInSchoolTz(at: Date, locale: "tr-TR" | "en-US", tz: string): string {
+  try {
+    return new Date(at).toLocaleString(locale, {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone: tz,
+    });
+  } catch {
+    return new Date(at).toLocaleString(locale);
+  }
 }
 
 export default function SinifDersiPage() {
@@ -91,12 +109,14 @@ export default function SinifDersiPage() {
           <>
             <p>Ders bekleniyor… / Waiting for the lesson…</p>
             <p className="muted">
-              Planlanan başlangıç: {startsAt.toLocaleString("tr-TR")}. Eğitmen dersi
-              başlattığında bu sayfa kendini yenileyecek.
+              Planlanan başlangıç: {formatInSchoolTz(startsAt, "tr-TR", status.schoolTz)} (
+              {status.schoolTz} saati). Eğitmen dersi başlattığında bu sayfa kendini
+              yenileyecek.
             </p>
             <p className="muted">
-              Scheduled start: {startsAt.toLocaleString("en-US")}. This page will refresh
-              automatically when your teacher starts the lesson.
+              Scheduled start: {formatInSchoolTz(startsAt, "en-US", status.schoolTz)} (
+              {status.schoolTz} time). This page will refresh automatically when your teacher
+              starts the lesson.
             </p>
           </>
         )}

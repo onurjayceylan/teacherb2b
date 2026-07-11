@@ -48,14 +48,41 @@ interface MaskedPayout {
   accountHolder: string;
 }
 
+interface AvailabilityWindow {
+  id: string;
+  weekday: number;
+  startMinute: number;
+  endMinute: number;
+  timezone: string;
+}
+
 interface Panel {
   teacherName: string;
   timezone: string;
   payableCents: number;
+  strikeCount: number;
+  strikeLimit: number;
+  availability: AvailabilityWindow[];
   payoutDetails: MaskedPayout | null;
   upcoming: UpcomingLesson[];
   settled: SettledLesson[];
   payouts: TeacherPayout[];
+}
+
+// ISO weekday order (0=Monday) — must match the server-side weekday convention.
+const WEEKDAYS_EN = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function minuteToHHMM(minute: number): string {
+  const h = String(Math.floor(minute / 60)).padStart(2, "0");
+  const m = String(minute % 60).padStart(2, "0");
+  return `${h}:${m}`;
+}
+
+function hhmmToMinute(value: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const minute = Number(m[1]) * 60 + Number(m[2]);
+  return minute >= 0 && minute <= 1440 ? minute : null;
 }
 
 const PAYOUT_METHOD_LABELS: Record<PayoutMethod, string> = {
@@ -85,6 +112,9 @@ export default function EgitmenPanelPage() {
   const [payoutMethod, setPayoutMethod] = useState<PayoutMethod>("wise_email");
   const [payoutValue, setPayoutValue] = useState("");
   const [payoutHolder, setPayoutHolder] = useState("");
+  const [availWeekday, setAvailWeekday] = useState("0");
+  const [availStart, setAvailStart] = useState("09:00");
+  const [availEnd, setAvailEnd] = useState("17:00");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -114,10 +144,68 @@ export default function EgitmenPanelPage() {
             This panel link cannot be used: it may be invalid or revoked. Contact the Teachernow
             team for a new link.
           </p>
+          <p>
+            <a href="/egitmen/link">Lost your link? Request a new one →</a>
+          </p>
           {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>
       </main>
     );
+  }
+
+  async function runAction(action: () => Promise<string | null>) {
+    setBusy(true);
+    setActionError(null);
+    setNotice(null);
+    try {
+      const msg = await action();
+      if (msg) setNotice(msg);
+      await load();
+    } catch (err) {
+      setActionError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function addAvailability(e: React.FormEvent) {
+    e.preventDefault();
+    const startMinute = hhmmToMinute(availStart);
+    const endMinute = hhmmToMinute(availEnd);
+    if (startMinute === null || endMinute === null || endMinute <= startMinute) {
+      setActionError("Please enter a valid time window (end must be after start).");
+      return;
+    }
+    void runAction(async () => {
+      await trpc.teacherPortal.addAvailability.mutate({
+        token,
+        weekday: Number(availWeekday),
+        startMinute,
+        endMinute,
+        timezone: panel!.timezone,
+      });
+      return "Availability window added.";
+    });
+  }
+
+  function removeAvailability(id: string) {
+    void runAction(async () => {
+      await trpc.teacherPortal.removeAvailability.mutate({ token, id });
+      return "Availability window removed.";
+    });
+  }
+
+  function dropLesson(lesson: UpcomingLesson) {
+    const confirmed = window.confirm(
+      "The lesson will be re-offered to other teachers. Dropping lessons frequently may reduce your future offers. Do you want to drop this lesson?",
+    );
+    if (!confirmed) return;
+    void runAction(async () => {
+      const res = await trpc.teacherPortal.dropLesson.mutate({ token, slotId: lesson.slotId });
+      return res.reoffered
+        ? "You dropped the lesson — it has been re-offered to another teacher."
+        : "You dropped the lesson — no replacement teacher was found, so the school has been refunded.";
+    });
   }
 
   async function savePayoutDetails(e: React.FormEvent) {
@@ -161,6 +249,101 @@ export default function EgitmenPanelPage() {
         <p className="muted">
           Payouts run every 2 weeks via Wise, after your documents have been verified.
         </p>
+        <p>
+          No-show strikes:{" "}
+          <span className={`badge ${panel.strikeCount === 0 ? "ok" : "warn"}`}>
+            {panel.strikeCount}/{panel.strikeLimit}
+          </span>{" "}
+          <span className="muted">{panel.strikeLimit} strikes lead to suspension.</span>
+        </p>
+      </div>
+
+      <div className="card">
+        <h2>My weekly availability</h2>
+        <p className="muted">
+          These windows tell us when you can teach — new lesson offers are matched against them.
+        </p>
+        {panel.availability.length === 0 ? (
+          <p className="error">
+            No availability windows yet — add at least one to receive lesson offers.
+          </p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Day</th>
+                <th>Hours</th>
+                <th>Time zone</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {panel.availability.map((w) => (
+                <tr key={w.id}>
+                  <td>{WEEKDAYS_EN[w.weekday] ?? w.weekday}</td>
+                  <td>
+                    {minuteToHHMM(w.startMinute)}–{minuteToHHMM(w.endMinute)}
+                  </td>
+                  <td>{w.timezone}</td>
+                  <td>
+                    <button
+                      className="secondary"
+                      style={{ marginTop: 0 }}
+                      disabled={busy}
+                      onClick={() => removeAvailability(w.id)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <form onSubmit={addAvailability}>
+          <div className="row">
+            <div>
+              <label htmlFor="av-day">Day</label>
+              <select
+                id="av-day"
+                value={availWeekday}
+                onChange={(e) => setAvailWeekday(e.target.value)}
+              >
+                {WEEKDAYS_EN.map((d, i) => (
+                  <option key={d} value={String(i)}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="av-start">From</label>
+              <input
+                id="av-start"
+                type="time"
+                value={availStart}
+                onChange={(e) => setAvailStart(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="av-end">To</label>
+              <input
+                id="av-end"
+                type="time"
+                value={availEnd}
+                onChange={(e) => setAvailEnd(e.target.value)}
+                required
+              />
+            </div>
+            <div>
+              <button type="submit" className="secondary" disabled={busy}>
+                Add window
+              </button>
+            </div>
+          </div>
+          <p className="muted">Times are in your time zone ({panel.timezone}).</p>
+        </form>
       </div>
 
       <div className="card">
@@ -289,6 +472,7 @@ export default function EgitmenPanelPage() {
                   <th>Duration</th>
                   <th>Rate</th>
                   <th>Join</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -302,6 +486,16 @@ export default function EgitmenPanelPage() {
                     <td>{formatCents(l.teacherPayCents)}</td>
                     <td>
                       <a href={l.joinUrl}>Join lesson →</a>
+                    </td>
+                    <td>
+                      <button
+                        className="secondary"
+                        style={{ marginTop: 0 }}
+                        disabled={busy}
+                        onClick={() => dropLesson(l)}
+                      >
+                        Drop this lesson
+                      </button>
                     </td>
                   </tr>
                 ))}

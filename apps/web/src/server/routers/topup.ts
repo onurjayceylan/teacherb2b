@@ -49,6 +49,32 @@ export const topupRouter = router({
     });
   }),
 
+  // Okulun bekleyen havaleleri (denetim P2): RLS okul-scoped — yalnız kendi satırları.
+  // Referans kodu dekont eşleşmesinin anahtarıdır; UI bunu kalın gösterir.
+  listPendingBank: schoolProcedure.query(async ({ ctx }) => {
+    return ctx.withSchoolDb(async (db) => {
+      const res = await db.query<{
+        id: string;
+        amount_cents: string; // pg bigint → string
+        currency: string;
+        bank_reference_code: string | null;
+        created_at: Date;
+      }>(
+        `SELECT id, amount_cents, currency, bank_reference_code, created_at
+           FROM topup_attempt
+          WHERE method = 'bank_transfer' AND status = 'pending_review'
+          ORDER BY created_at DESC`,
+      );
+      return res.rows.map((r) => ({
+        id: r.id,
+        amountCents: Number(r.amount_cents),
+        currency: r.currency.trim(),
+        referenceCode: r.bank_reference_code,
+        createdAt: r.created_at,
+      }));
+    });
+  }),
+
   createBank: schoolProcedure
     .input(
       z.object({

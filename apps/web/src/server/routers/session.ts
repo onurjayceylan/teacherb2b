@@ -75,6 +75,7 @@ interface SlotSessionRow {
   teacher_pay_cents: string; // pg bigint → string
   class_group_id: string;
   class_name: string;
+  school_tz: string | null;
   teacher_name: string | null;
   teacher_tz: string | null;
   session_id: string | null;
@@ -87,10 +88,12 @@ async function loadSlotSession(db: Db, slotId: string): Promise<SlotSessionRow |
   const res = await db.query<SlotSessionRow>(
     `SELECT s.id AS slot_id, s.status AS slot_status, s.starts_at, s.ends_at,
             s.teacher_pay_cents, s.class_group_id, cg.name AS class_name,
+            dp.school_tz,
             t.full_name AS teacher_name, t.timezone AS teacher_tz,
             cs.id AS session_id, cs.status AS session_status, cs.dosage_min
        FROM booking_slot s
        JOIN class_group cg ON cg.id = s.class_group_id
+       LEFT JOIN dosage_plan dp ON dp.id = s.plan_id
        LEFT JOIN class_session cs ON cs.slot_id = s.id
        LEFT JOIN assignment a ON a.slot_id = s.id AND a.status = 'confirmed'
        LEFT JOIN teacher t ON t.id = COALESCE(cs.teacher_id, a.teacher_id)
@@ -258,6 +261,10 @@ export const sessionRouter = router({
         return {
           className: row.class_name,
           startsAt: row.starts_at,
+          // Saatler planın OKUL saat diliminde basılır (denetim P2) — sayfa okul/öğrenci
+          // projeksiyonuna açılıyor; tarayıcının dilimi yanıltabilir. Plansız (eski) slot
+          // için makul varsayılan: Europe/Istanbul (sınıflar Türkiye'de).
+          schoolTz: row.school_tz ?? "Europe/Istanbul",
           started: row.session_status === "started",
           ended: row.session_status === "ended" || row.session_status === "settled",
         };

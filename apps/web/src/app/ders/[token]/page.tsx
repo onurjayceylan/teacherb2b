@@ -52,9 +52,12 @@ export default function DersPage() {
     try {
       const r = await trpc.session.getRoom.query({ token });
       setRoom(r);
-      // Checklist ön dolumu: işaretlenmişse DB'deki değer, değilse varsayılan "geldi".
+      // Checklist ön dolumu (denetim P2): yalnız DB'de kayıtlı işaretler yüklenir —
+      // present ÖN SEÇİLİ DEĞİLDİR; işaretsiz öğrenci "unmarked" kalır ve finish'te uyarılır.
       const next: Record<string, boolean> = {};
-      for (const s of r.roster) next[s.studentId] = s.present ?? true;
+      for (const s of r.roster) {
+        if (s.present !== null) next[s.studentId] = s.present;
+      }
       setChecks(next);
     } catch (err) {
       setRoom(null);
@@ -85,22 +88,49 @@ export default function DersPage() {
 
   function saveAttendance() {
     if (!room || room.roster.length === 0) return;
-    void run(async () => {
-      await trpc.session.mark.mutate({
-        token,
-        entries: room.roster.map((s) => ({
-          studentId: s.studentId,
-          present: checks[s.studentId] ?? true,
-        })),
-      });
-    }, "Attendance saved.");
-  }
-
-  function finishLesson() {
-    if (!window.confirm("Are you sure you want to finish the lesson? The duration will be finalized and your payment processed.")) {
+    // Yalnız İŞARETLENMİŞ öğrenciler kaydedilir — işaretsizler DB'de "unmarked" kalır
+    // (finish uyarısı bu sayede doğru sayar).
+    const entries = room.roster
+      .filter((s) => checks[s.studentId] !== undefined)
+      .map((s) => ({ studentId: s.studentId, present: checks[s.studentId]! }));
+    if (entries.length === 0) {
+      setActionError("Mark at least one student first (or use “Mark all present”).");
       return;
     }
     void run(async () => {
+      await trpc.session.mark.mutate({ token, entries });
+    }, "Attendance saved.");
+  }
+
+  function markAllPresent() {
+    if (!room) return;
+    const next: Record<string, boolean> = {};
+    for (const s of room.roster) next[s.studentId] = true;
+    setChecks(next);
+  }
+
+  function finishLesson() {
+    if (!room) return;
+    const unmarkedCount = room.roster.filter((s) => checks[s.studentId] === undefined).length;
+    const message =
+      unmarkedCount > 0
+        ? `${unmarkedCount} student${unmarkedCount === 1 ? "" : "s"} unmarked — they will be recorded as absent. Finish the lesson? The duration will be finalized and your payment processed.`
+        : "Are you sure you want to finish the lesson? The duration will be finalized and your payment processed.";
+    if (!window.confirm(message)) {
+      return;
+    }
+    void run(async () => {
+      // Onaylı devam: mevcut işaret durumu tüm sınıf için kalıcılaştırılır (işaretsiz →
+      // absent) — uyarı metniyle kayıt bire bir tutarlı. Settle akışına dokunulmaz.
+      if (room.roster.length > 0) {
+        await trpc.session.mark.mutate({
+          token,
+          entries: room.roster.map((s) => ({
+            studentId: s.studentId,
+            present: checks[s.studentId] ?? false,
+          })),
+        });
+      }
       const res = await trpc.session.finish.mutate({ token });
       setFinished({ dosageMin: res.dosageMin, reviewRequired: res.reviewRequired === true });
     }, null);
@@ -207,7 +237,10 @@ export default function DersPage() {
             </table>
           ) : (
             <>
-              <p className="muted">Check the students who attended the lesson.</p>
+              <p className="muted">
+                Check the students who attended the lesson. Students start unmarked — anyone left
+                unmarked when you finish will be recorded as absent.
+              </p>
               <ul style={{ listStyle: "none", padding: 0 }}>
                 {room.roster.map((s) => (
                   <li key={s.studentId} style={{ marginBottom: "0.35rem" }}>
@@ -215,7 +248,7 @@ export default function DersPage() {
                       <input
                         type="checkbox"
                         style={{ width: "auto", marginRight: "0.5rem" }}
-                        checked={checks[s.studentId] ?? true}
+                        checked={checks[s.studentId] ?? false}
                         onChange={(e) =>
                           setChecks({ ...checks, [s.studentId]: e.target.checked })
                         }
@@ -223,14 +256,21 @@ export default function DersPage() {
                       {s.name}
                       {s.present !== null ? (
                         <span className="muted"> (saved: {s.present ? "present" : "absent"})</span>
-                      ) : null}
+                      ) : (
+                        <span className="muted"> (unmarked)</span>
+                      )}
                     </label>
                   </li>
                 ))}
               </ul>
-              <button className="secondary" disabled={busy} onClick={saveAttendance}>
-                Save attendance
-              </button>
+              <div style={{ display: "flex", gap: "0.5rem" }}>
+                <button className="secondary" disabled={busy} onClick={markAllPresent}>
+                  Mark all present
+                </button>
+                <button className="secondary" disabled={busy} onClick={saveAttendance}>
+                  Save attendance
+                </button>
+              </div>
             </>
           )}
         </div>

@@ -202,4 +202,83 @@ describe("materializePlans", () => {
     await assertInvariantsClean(tdb.pool);
     await completePlan(tdb.pool, planId);
   });
+
+  it("plan-başına yalıtım: bozuk plan koşuyu düşürmez — diğer plan materialize olur, audit izi düşer", async () => {
+    // Kronolojik İLK plan bozuk: dayanıklılık yoksa ikinci plana hiç sıra gelmezdi.
+    const bad = await seedSchool(tdb.pool, "Bozuk Okul");
+    const poolId = await seedPool(tdb.pool, "mat_pool_4");
+    await topupSchool(tdb.pool, bad.schoolId, 10_000);
+    const start = futureDate("Europe/Istanbul", 2);
+    const badPlan = await seedPlan(tdb.pool, {
+      schoolId: bad.schoolId,
+      classGroupId: bad.classGroupId,
+      poolId,
+      weekday: start.weekday,
+      startMinute: 600,
+      durationMin: 60,
+      schoolTz: "Europe/Istanbul",
+      priceCents: 10_000,
+      teacherPayCents: 6_000,
+      startDate: start.dateISO,
+      weeks: 1,
+    });
+    // school_tz kasıtlı bozulur → occurrenceDates plan seviyesinde fırlatır
+    await tdb.pool.withPlatform((db) =>
+      db.query(`UPDATE dosage_plan SET school_tz = 'Not/AZone', updated_at = now() WHERE id = $1`, [
+        badPlan,
+      ]),
+    );
+
+    const good = await seedSchool(tdb.pool, "Saglam Okul");
+    await topupSchool(tdb.pool, good.schoolId, 10_000);
+    const goodPlan = await seedPlan(tdb.pool, {
+      schoolId: good.schoolId,
+      classGroupId: good.classGroupId,
+      poolId,
+      weekday: start.weekday,
+      startMinute: 660,
+      durationMin: 60,
+      schoolTz: "Europe/Istanbul",
+      priceCents: 10_000,
+      teacherPayCents: 6_000,
+      startDate: start.dateISO,
+      weeks: 1,
+    });
+
+    const result = await materializePlans(tdb.pool);
+    // Bozuk plan failedPlans'a düşer; sağlam planın slotu YİNE oluşur
+    expect(result.created).toBe(1);
+    expect(result.blocked).toBe(0);
+    expect(result.failedPlans).toEqual([
+      { planId: badPlan, error: expect.stringContaining("geçersiz start_date/school_tz") },
+    ]);
+    expect(await planSlots(goodPlan)).toHaveLength(1);
+    expect(await planSlots(badPlan)).toHaveLength(0);
+
+    // audit_log: materializer_plan_failed satırı plan_id + hata mesajıyla
+    const audit = await tdb.pool.withPlatform(async (db) => {
+      const res = await db.query<{ school_id: string; after: Record<string, unknown> }>(
+        `SELECT school_id, after FROM audit_log
+          WHERE action = 'materializer_plan_failed' AND entity_id = $1`,
+        [badPlan],
+      );
+      return res.rows;
+    });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]!.school_id).toBe(bad.schoolId);
+    expect(audit[0]!.after).toMatchObject({
+      plan_id: badPlan,
+      error: expect.stringContaining("geçersiz start_date/school_tz"),
+    });
+
+    // İkinci koşu: sağlam plan idempotent atlanır, bozuk plan yine raporlanır
+    const second = await materializePlans(tdb.pool);
+    expect(second.created).toBe(0);
+    expect(second.skipped).toBe(1);
+    expect(second.failedPlans).toHaveLength(1);
+
+    await assertInvariantsClean(tdb.pool);
+    await completePlan(tdb.pool, badPlan);
+    await completePlan(tdb.pool, goodPlan);
+  });
 });

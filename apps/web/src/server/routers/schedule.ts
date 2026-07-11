@@ -106,6 +106,8 @@ export const scheduleRouter = router({
     return ctx.withSchoolDb(async (db) => {
       const res = await db.query<{
         id: string;
+        class_group_id: string;
+        pool_id: string;
         weekday: number;
         start_minute: number;
         duration_min: number;
@@ -121,7 +123,8 @@ export const scheduleRouter = router({
         scheduled_count: string;
         blocked_count: string;
       }>(
-        `SELECT p.id, p.weekday, p.start_minute, p.duration_min, p.school_tz,
+        `SELECT p.id, p.class_group_id, p.pool_id, p.weekday, p.start_minute, p.duration_min,
+                p.school_tz,
                 p.price_cents, p.start_date::text AS start_date, p.weeks, p.status, p.created_at,
                 cg.name AS class_name, pl.name AS pool_name,
                 count(s.id) AS total_slots,
@@ -136,6 +139,8 @@ export const scheduleRouter = router({
       );
       return res.rows.map((r) => ({
         id: r.id,
+        classGroupId: r.class_group_id,
+        poolId: r.pool_id,
         weekday: r.weekday,
         startMinute: r.start_minute,
         durationMin: r.duration_min,
@@ -153,6 +158,193 @@ export const scheduleRouter = router({
       }));
     });
   }),
+
+  // Planı başka sınıflara uygula (denetim P2): kaynak planın parametre snapshot'ıyla
+  // sınıf başına create_dosage_plan RPC (okul bağlamı — RLS + tenant kapısı), ardından
+  // TEK materialize turu. Sonuç sınıf başına raporlanır: kaç slot planlandı, kaç tanesi
+  // bakiye yetersizliğinden bloke (materializer bakiye gelince blokeleri yeniden dener).
+  applyPlanToClasses: schoolProcedure
+    .input(
+      z.object({
+        planId: z.string().uuid(),
+        classGroupIds: z.array(z.string().uuid()).min(1).max(30),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      const created = await ctx.withSchoolDb(async (db) => {
+        // Kaynak plan sahipliği RLS'li SELECT'le kanıtlı; parametreler snapshot alınır.
+        const plan = await db.query<{
+          class_group_id: string;
+          pool_id: string;
+          weekday: number;
+          start_minute: number;
+          duration_min: number;
+          start_date: string;
+          weeks: number;
+        }>(
+          `SELECT class_group_id, pool_id, weekday, start_minute, duration_min,
+                  start_date::text AS start_date, weeks
+             FROM dosage_plan WHERE id = $1`,
+          [input.planId],
+        );
+        const src = plan.rows[0];
+        if (!src) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "plan bulunamadı" });
+        }
+        const pool = await db.query<{ id: string }>(
+          "SELECT id FROM pool WHERE id = $1 AND active",
+          [src.pool_id],
+        );
+        if (!pool.rows[0]) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "planın havuzu artık aktif değil — yeni reçete açılamaz",
+          });
+        }
+
+        const out: {
+          classGroupId: string;
+          className: string;
+          planId: string | null;
+          error: string | null;
+        }[] = [];
+        for (const cgId of [...new Set(input.classGroupIds)]) {
+          const cg = await db.query<{ id: string; name: string }>(
+            "SELECT id, name FROM class_group WHERE id = $1 AND active",
+            [cgId],
+          );
+          const cgRow = cg.rows[0];
+          if (!cgRow) {
+            out.push({ classGroupId: cgId, className: "—", planId: null, error: "sınıf bulunamadı" });
+            continue;
+          }
+          try {
+            const ins = await db.query<{ id: string }>(
+              `SELECT create_dosage_plan($1, $2, $3, $4, $5, $6, $7, $8, $9) AS id`,
+              [
+                ctx.activeSchoolId,
+                cgId,
+                src.pool_id,
+                src.weekday,
+                src.start_minute,
+                src.duration_min,
+                src.start_date,
+                src.weeks,
+                ctx.actor.userId,
+              ],
+            );
+            const row = ins.rows[0];
+            if (!row) throw new Error("applyPlanToClasses: RPC satır dönmedi");
+            out.push({ classGroupId: cgId, className: cgRow.name, planId: row.id, error: null });
+          } catch (err) {
+            // Sınıf başına hata yutulmaz — satırda raporlanır, diğer sınıflar devam eder.
+            out.push({
+              classGroupId: cgId,
+              className: cgRow.name,
+              planId: null,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+        return out;
+      });
+
+      // Tek materialize turu (platform bağlamı): tüm yeni planların slot+hold+teklifleri.
+      if (created.some((c) => c.planId)) {
+        await materializePlans(ctx.pool, { horizonWeeks: 4 });
+      }
+
+      // Sınıf başına sonuç sayaçları (okul bağlamı — RLS'li okuma).
+      return ctx.withSchoolDb(async (db) => {
+        const results = [];
+        for (const c of created) {
+          if (!c.planId) {
+            results.push({ ...c, scheduledCount: 0, blockedCount: 0 });
+            continue;
+          }
+          const counts = await db.query<{ scheduled: string; blocked: string }>(
+            `SELECT count(*) FILTER (WHERE status = 'scheduled') AS scheduled,
+                    count(*) FILTER (WHERE status = 'blocked_insufficient_funds') AS blocked
+               FROM booking_slot WHERE plan_id = $1`,
+            [c.planId],
+          );
+          results.push({
+            ...c,
+            scheduledCount: Number(counts.rows[0]?.scheduled ?? 0),
+            blockedCount: Number(counts.rows[0]?.blocked ?? 0),
+          });
+        }
+        return { results };
+      });
+    }),
+
+  // Planı iptal et (denetim P2): gelecekteki scheduled slotlar TEK TEK cancelBySchool'dan
+  // geçer — erken/geç (%50) matrisini modül uygular, para daima ledger kapısından işler.
+  // Sonra plan cancelled'a çekilir (materializer yeni hafta üretmez). Sonuç özeti döner.
+  cancelPlan: schoolProcedure
+    .input(z.object({ planId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const slots = await ctx.withSchoolDb(async (db) => {
+        const plan = await db.query<{ id: string; status: string }>(
+          "SELECT id, status FROM dosage_plan WHERE id = $1",
+          [input.planId],
+        );
+        const p = plan.rows[0];
+        if (!p) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "plan bulunamadı" });
+        }
+        if (p.status !== "active" && p.status !== "paused") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `plan zaten sonuçlanmış (durum: ${p.status})`,
+          });
+        }
+        const res = await db.query<{ id: string }>(
+          `SELECT id FROM booking_slot
+            WHERE plan_id = $1 AND status = 'scheduled' AND starts_at > now()
+            ORDER BY starts_at`,
+          [input.planId],
+        );
+        return res.rows;
+      });
+
+      // Slot başına iptal: her çağrı kendi platform tx'i (FOR UPDATE serileşir).
+      // Yarışta düşen slot (başladı/zaten iptal) hata satırı olarak toplanır, akış sürer.
+      let freeCount = 0;
+      let lateCount = 0;
+      const failures: string[] = [];
+      for (const s of slots) {
+        try {
+          const res = await cancelBySchool(ctx.pool, { slotId: s.id });
+          if (res.status === "cancelled_school_early") freeCount += 1;
+          else lateCount += 1;
+        } catch (err) {
+          failures.push(err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      await ctx.withSchoolDb(async (db) => {
+        const res = await db.query(
+          `UPDATE dosage_plan SET status = 'cancelled', updated_at = now()
+            WHERE id = $1 AND status IN ('active', 'paused')`,
+          [input.planId],
+        );
+        if (res.rowCount !== 1) {
+          // Yarış: plan bu arada başka yerden sonuçlandıysa iptal sayaçları yine döner.
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "plan durumu değiştirilemedi (eşzamanlı değişiklik olabilir)",
+          });
+        }
+      });
+
+      return {
+        planId: input.planId,
+        cancelledFree: freeCount,
+        cancelledLate: lateCount,
+        failedCount: failures.length,
+      };
+    }),
 
   // Slotlar + atanmış eğitmenin YALNIZ adı. Slot okuması okul bağlamında (RLS + kolon
   // grant'i teacher_pay/hold kolonlarını dışarıda tutar); confirmed atamanın eğitmen adı

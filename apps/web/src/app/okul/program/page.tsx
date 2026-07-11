@@ -22,6 +22,8 @@ interface ClassGroup {
 
 interface Plan {
   id: string;
+  classGroupId: string;
+  poolId: string;
   weekday: number;
   startMinute: number;
   durationMin: number;
@@ -33,6 +35,15 @@ interface Plan {
   className: string;
   poolName: string;
   totalSlots: number;
+  scheduledCount: number;
+  blockedCount: number;
+}
+
+interface ApplyResult {
+  classGroupId: string;
+  className: string;
+  planId: string | null;
+  error: string | null;
   scheduledCount: number;
   blockedCount: number;
 }
@@ -150,6 +161,10 @@ export default function ProgramPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [skipDate, setSkipDate] = useState("");
   const [skipReason, setSkipReason] = useState("");
+  // "Başka sınıflara uygula": açık panelin plan id'si + seçili sınıflar + son sonuçlar.
+  const [applyPlanId, setApplyPlanId] = useState<string | null>(null);
+  const [applyClassIds, setApplyClassIds] = useState<string[]>([]);
+  const [applyResults, setApplyResults] = useState<ApplyResult[] | null>(null);
   // Üretilen katılım linkleri slot bazında gösterilir; ham token yalnız bu state'te yaşar.
   const [joinLinks, setJoinLinks] = useState<Record<string, JoinLinks>>({});
   // Slot bazlı yoklama görünümü (okul kendi öğrencisini TAM ADLA görür — okul-scoped ekran).
@@ -294,6 +309,53 @@ export default function ProgramPage() {
     void run(async () => {
       await trpc.schedule.openDispute.mutate({ sessionId: slot.sessionId!, reason: reason.trim() });
       setNotice("İtirazınız alındı — platform ekibi inceleyip sonucu bildirecek.");
+    }, null);
+  }
+
+  function toggleApplyPanel(plan: Plan) {
+    if (applyPlanId === plan.id) {
+      setApplyPlanId(null);
+      setApplyClassIds([]);
+      setApplyResults(null);
+      return;
+    }
+    setApplyPlanId(plan.id);
+    setApplyClassIds([]);
+    setApplyResults(null);
+  }
+
+  function submitApply(plan: Plan) {
+    if (applyClassIds.length === 0) {
+      setActionError("En az bir sınıf seçin");
+      return;
+    }
+    void run(async () => {
+      const res = await trpc.schedule.applyPlanToClasses.mutate({
+        planId: plan.id,
+        classGroupIds: applyClassIds,
+      });
+      setApplyResults(res.results);
+      setApplyClassIds([]);
+      const okCount = res.results.filter((r) => r.planId && !r.error).length;
+      setNotice(`Plan ${okCount} sınıfa uygulandı — sınıf başına sonuç aşağıda.`);
+    }, null);
+  }
+
+  function cancelPlan(plan: Plan) {
+    const confirmed = window.confirm(
+      "Gelecek dersler iptal edilir: 24 saatten uzak olanlar ücretsiz, yakın olanlar %50 kesintili. Plan iptal edilsin mi?",
+    );
+    if (!confirmed) return;
+    void run(async () => {
+      const res = await trpc.schedule.cancelPlan.mutate({ planId: plan.id });
+      const parts = [
+        `${res.cancelledFree} ders ücretsiz iptal edildi`,
+        `${res.cancelledLate} ders %50 kesintiyle iptal edildi`,
+      ];
+      if (res.failedCount > 0) {
+        parts.push(`${res.failedCount} ders iptal edilemedi (takvimden kontrol edin)`);
+      }
+      setNotice(`Plan iptal edildi — ${parts.join(", ")}.`);
     }, null);
   }
 
@@ -522,6 +584,24 @@ export default function ProgramPage() {
                             Devam ettir
                           </button>
                         ) : null}
+                        <button
+                          className="secondary"
+                          style={{ marginTop: 0 }}
+                          disabled={busy}
+                          onClick={() => toggleApplyPanel(p)}
+                        >
+                          {applyPlanId === p.id ? "Uygulamayı kapat" : "Başka sınıflara uygula"}
+                        </button>
+                        {p.status === "active" || p.status === "paused" ? (
+                          <button
+                            className="secondary"
+                            style={{ marginTop: 0 }}
+                            disabled={busy}
+                            onClick={() => cancelPlan(p)}
+                          >
+                            Planı iptal et
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -530,6 +610,89 @@ export default function ProgramPage() {
             </table>
           </div>
         )}
+
+        {applyPlanId
+          ? (() => {
+              const plan = plans.find((p) => p.id === applyPlanId);
+              if (!plan) return null;
+              const targets = classes.filter((c) => c.id !== plan.classGroupId);
+              return (
+                <div style={{ marginTop: "1rem" }}>
+                  <h3>
+                    &quot;{plan.className} — {WEEKDAYS[plan.weekday]} {minuteToHHMM(plan.startMinute)}
+                    &quot; planını başka sınıflara uygula
+                  </h3>
+                  <p className="muted">
+                    Seçilen her sınıf için aynı havuz, gün/saat ve hafta sayısıyla yeni reçete
+                    oluşturulur; ders ücretleri cüzdanınızdan bloke edilir.
+                  </p>
+                  {targets.length === 0 ? (
+                    <p className="muted">
+                      Uygulanacak başka sınıf yok — önce <a href="/okul/siniflar">sınıf ekleyin</a>.
+                    </p>
+                  ) : (
+                    <>
+                      <ul style={{ listStyle: "none", padding: 0 }}>
+                        {targets.map((c) => (
+                          <li key={c.id} style={{ marginBottom: "0.35rem" }}>
+                            <label>
+                              <input
+                                type="checkbox"
+                                style={{ width: "auto", marginRight: "0.5rem" }}
+                                checked={applyClassIds.includes(c.id)}
+                                onChange={(e) =>
+                                  setApplyClassIds((prev) =>
+                                    e.target.checked
+                                      ? [...prev, c.id]
+                                      : prev.filter((id) => id !== c.id),
+                                  )
+                                }
+                              />
+                              {c.name}
+                            </label>
+                          </li>
+                        ))}
+                      </ul>
+                      <button disabled={busy || applyClassIds.length === 0} onClick={() => submitApply(plan)}>
+                        Seçili {applyClassIds.length} sınıfa uygula
+                      </button>
+                    </>
+                  )}
+                  {applyResults ? (
+                    <table style={{ marginTop: "0.75rem" }}>
+                      <thead>
+                        <tr>
+                          <th>Sınıf</th>
+                          <th>Sonuç</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {applyResults.map((r) => (
+                          <tr key={r.classGroupId}>
+                            <td>{r.className}</td>
+                            <td>
+                              {r.error ? (
+                                <span className="badge warn">hata: {r.error}</span>
+                              ) : (
+                                <>
+                                  <span className="badge ok">{r.scheduledCount} slot planlandı</span>
+                                  {r.blockedCount > 0 ? (
+                                    <span className="badge warn" style={{ marginLeft: "0.35rem" }}>
+                                      bakiye yetersiz — {r.blockedCount} slot bloke
+                                    </span>
+                                  ) : null}
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : null}
+                </div>
+              );
+            })()
+          : null}
       </div>
 
       {selectedPlan ? (

@@ -17,6 +17,37 @@ function maskEmail(email: string): string {
   return `${email[0]}***@${email.slice(at + 1)}`;
 }
 
+/** Sağlık şeridi worker eşikleri (ms): cron aralığı + makul gecikme payı (healthz deseni). */
+const HEALTH_WORKER_STALE_MS: Record<string, number> = {
+  "invariant-sentinel": 2 * 60 * 60_000, // saatlik cron → 2 saat
+  "dispatch-materializer": 26 * 60 * 60_000, // günlük cron → 26 saat
+  "offer-timeout-sweeper": 15 * 60_000, // 5 dk cron → 15 dk
+  "notification-dispatcher": 10 * 60_000, // 2 dk cron → 10 dk
+  "backfill-sweeper": 30 * 60_000, // 10 dk cron → 30 dk
+  "payout-reconciler": 30 * 60_000, // 15 dk cron → 30 dk
+  "hr-reminders": 26 * 60 * 60_000, // günlük cron → 26 saat
+  "low-balance-check": 26 * 60 * 60_000, // günlük cron → 26 saat
+  "external-reconciler": 26 * 60 * 60_000, // günlük cron → 26 saat
+};
+
+/** Funnel adım sırası — geçiş süresi medyanları bu ardışık çiftler üzerinden hesaplanır. */
+const FUNNEL_STEP_ORDER = [
+  "funnel_school_created",
+  "funnel_wallet_funded",
+  "funnel_roster_imported",
+  "funnel_first_plan",
+  "funnel_wizard_done",
+];
+
+/** Medyan (saat cinsi girdi bekler); boş dizide null. */
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid]!;
+  return (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
 export const adminRouter = router({
   listPendingTopups: platformProcedure.query(async ({ ctx }) => {
     return ctx.pool.withPlatform(async (db) => {
@@ -148,6 +179,59 @@ export const adminRouter = router({
       return { frozen: input.frozen };
     }),
 
+  // ---- Sağlık şeridi (/admin üstü, denetim P2) ----
+
+  // Tek bakışta operasyon durumu: bugünkü dersler (Europe/Istanbul günü — admin yüzü
+  // Türkiye'den bakar), şu an canlı ders, en eski bekleyen havale yaşı, failed payout,
+  // worker heartbeat tazeliği (eşikler cron aralığı + pay) ve bekleyen bildirim sayısı.
+  healthStrip: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const today = await db.query<{ n: string }>(
+        `SELECT count(*) AS n FROM booking_slot
+          WHERE (starts_at AT TIME ZONE 'Europe/Istanbul')::date =
+                (now() AT TIME ZONE 'Europe/Istanbul')::date`,
+      );
+      const live = await db.query<{ n: string }>(
+        `SELECT count(*) AS n FROM class_session
+          WHERE started_at IS NOT NULL AND ended_at IS NULL`,
+      );
+      const oldestPending = await db.query<{ age_days: number | null }>(
+        `SELECT EXTRACT(EPOCH FROM (now() - min(created_at))) / 86400.0 AS age_days
+           FROM topup_attempt
+          WHERE method = 'bank_transfer' AND status = 'pending_review'`,
+      );
+      const failedPayouts = await db.query<{ n: string }>(
+        "SELECT count(*) AS n FROM payout WHERE status = 'failed'",
+      );
+      const pendingNotifications = await db.query<{ n: string }>(
+        "SELECT count(*) AS n FROM notification_outbox WHERE status = 'pending'",
+      );
+      const hb = await db.query<{ job: string; last_run_at: Date }>(
+        "SELECT job, last_run_at FROM worker_heartbeat WHERE job = ANY($1::text[])",
+        [Object.keys(HEALTH_WORKER_STALE_MS)],
+      );
+      const lastRunByJob = new Map(hb.rows.map((r) => [r.job, r.last_run_at]));
+      const now = Date.now();
+      const workers = Object.entries(HEALTH_WORKER_STALE_MS).map(([job, staleAfterMs]) => {
+        const lastRunAt = lastRunByJob.get(job) ?? null;
+        return {
+          job,
+          lastRunAt,
+          stale: lastRunAt === null || now - lastRunAt.getTime() > staleAfterMs,
+        };
+      });
+      const oldestAge = oldestPending.rows[0]?.age_days;
+      return {
+        todayLessonCount: Number(today.rows[0]?.n ?? 0),
+        liveLessonCount: Number(live.rows[0]?.n ?? 0),
+        oldestPendingTopupDays: oldestAge === null || oldestAge === undefined ? null : Number(oldestAge),
+        failedPayoutCount: Number(failedPayouts.rows[0]?.n ?? 0),
+        pendingNotificationCount: Number(pendingNotifications.rows[0]?.n ?? 0),
+        workers,
+      };
+    });
+  }),
+
   // ---- Pilot go/no-go panosu (/admin/metrikler) ----
   // Tek okuma turu, tamamı platform bağlamında. Yorumlama kuralları:
   // - Aktivasyon medyanları yalnız ilgili olayı yaşamış okullar üzerinden hesaplanır.
@@ -189,6 +273,36 @@ export const adminRouter = router({
           GROUP BY action`,
       );
 
+      // Funnel geçiş SÜRELERİ (denetim P2): okul başına adımın İLK olayı alınır,
+      // ardışık adım çiftinin farkı (saat) toplanır; medyan JS'te (pilot ölçeği küçük).
+      const funnelFirsts = await db.query<{ school_id: string; action: string; first_at: Date }>(
+        `SELECT school_id, action, min(occurred_at) AS first_at
+           FROM audit_log
+          WHERE action LIKE 'funnel_%' AND school_id IS NOT NULL
+          GROUP BY school_id, action`,
+      );
+      const firstsBySchool = new Map<string, Map<string, Date>>();
+      for (const r of funnelFirsts.rows) {
+        const m = firstsBySchool.get(r.school_id) ?? new Map<string, Date>();
+        m.set(r.action, r.first_at);
+        firstsBySchool.set(r.school_id, m);
+      }
+      const funnelDurations = FUNNEL_STEP_ORDER.slice(0, -1).map((fromAction, i) => {
+        const toAction = FUNNEL_STEP_ORDER[i + 1]!;
+        const diffsHours: number[] = [];
+        for (const m of firstsBySchool.values()) {
+          const from = m.get(fromAction);
+          const to = m.get(toAction);
+          if (from && to) diffsHours.push((to.getTime() - from.getTime()) / 3_600_000);
+        }
+        return {
+          fromAction,
+          toAction,
+          schoolCount: diffsHours.length,
+          medianHours: median(diffsHours),
+        };
+      });
+
       const slots = await db.query<{ status: string; n: string }>(
         `SELECT status, count(*) AS n
            FROM booking_slot
@@ -202,6 +316,23 @@ export const adminRouter = router({
       const escalated = slotCounts["escalated"] ?? 0;
       const noShow = slotCounts["no_show_teacher"] ?? 0;
       const realizationDenom = completed + escalated + noShow;
+
+      // Dosaj gerçekleşmesi DAKİKA bazında (denetim P2): settle edilmiş dosage_min toplamı
+      // / "olması gereken" derslerin planlı dakika toplamı (sonuçlanmış slotlar — aynı
+      // pencere). Sayım oranı kaba kalıyordu: kısa biten ders sayımda tam görünür.
+      const minutes = await db.query<{ planned_min: string; settled_min: string }>(
+        `SELECT COALESCE(sum(EXTRACT(EPOCH FROM (s.ends_at - s.starts_at)) / 60.0)
+                  FILTER (WHERE s.status IN ('completed', 'escalated', 'no_show_teacher')), 0)
+                  AS planned_min,
+                COALESCE(sum(cs.dosage_min) FILTER (WHERE cs.status = 'settled'), 0)
+                  AS settled_min
+           FROM booking_slot s
+           LEFT JOIN class_session cs ON cs.slot_id = s.id
+          WHERE s.starts_at >= now() - interval '28 days'
+            AND s.starts_at <  now() + interval '28 days'`,
+      );
+      const plannedMinutes = Math.round(Number(minutes.rows[0]?.planned_min ?? 0));
+      const settledMinutes = Math.round(Number(minutes.rows[0]?.settled_min ?? 0));
 
       const backfill = await db.query<{ sla_escalated: string; reoffered: string }>(
         `SELECT count(*) FILTER (WHERE action = 'sla_escalated') AS sla_escalated,
@@ -223,15 +354,16 @@ export const adminRouter = router({
           0,
       );
 
-      const repeatTopupSchools = Number(
-        (
-          await db.query<{ n: string }>(
-            `SELECT count(*) AS n FROM (
-               SELECT school_id FROM topup_attempt
-                WHERE status = 'settled' GROUP BY school_id HAVING count(*) >= 2) r`,
-          )
-        ).rows[0]?.n ?? 0,
+      // Repeat-topup ORANI (denetim P2): ≥2 settled top-up'lı okul / ≥1 settled top-up'lı
+      // okul — payda "hiç yükleme yapmamış" okulları içermez (oran retention'ı ölçer).
+      const repeatTopup = await db.query<{ repeat_schools: string; funded_schools: string }>(
+        `SELECT count(*) FILTER (WHERE n >= 2) AS repeat_schools,
+                count(*) AS funded_schools
+           FROM (SELECT school_id, count(*) AS n FROM topup_attempt
+                  WHERE status = 'settled' GROUP BY school_id) r`,
       );
+      const repeatTopupSchools = Number(repeatTopup.rows[0]?.repeat_schools ?? 0);
+      const fundedSchools = Number(repeatTopup.rows[0]?.funded_schools ?? 0);
 
       const teachers = await db.query<{ active: string; payout_ready: string }>(
         `SELECT count(*) FILTER (WHERE status = 'active') AS active,
@@ -254,12 +386,18 @@ export const adminRouter = router({
             schools: Number(r.schools),
             events: Number(r.events),
           })),
+          // Adımlar arası geçiş süresi medyanı (saat) — yalnız iki adımı da yaşamış okullar.
+          funnelDurations,
         },
         dosage: {
           windowDays: 28,
           slotCounts,
           // Gerçekleşme oranı: completed / (completed + escalated + no_show) — 0..1, veri yoksa null.
           realizationRate: realizationDenom > 0 ? completed / realizationDenom : null,
+          // Dakika bazında gerçekleşme: settle edilmiş dosaj dk / planlı dk (denetim P2).
+          plannedMinutes,
+          settledMinutes,
+          minuteRealizationRate: plannedMinutes > 0 ? settledMinutes / plannedMinutes : null,
         },
         backfill: {
           slaEscalatedCount: Number(backfill.rows[0]?.sla_escalated ?? 0),
@@ -272,6 +410,9 @@ export const adminRouter = router({
           // İtiraz oranı: itiraz / settled ders — hedef < %2; settled ders yoksa null.
           disputeRate: settledLessons > 0 ? disputeCount / settledLessons : null,
           repeatTopupSchools,
+          fundedSchools,
+          // Oran: ≥2 settled top-up'lı okul / ≥1 settled top-up'lı okul — veri yoksa null.
+          repeatTopupRate: fundedSchools > 0 ? repeatTopupSchools / fundedSchools : null,
         },
         teachers: {
           activeCount: Number(teachers.rows[0]?.active ?? 0),

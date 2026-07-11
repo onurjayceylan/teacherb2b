@@ -6,6 +6,7 @@ export {
   materializePlans,
   type MaterializeOptions,
   type MaterializeResult,
+  type MaterializeFailedPlan,
 } from "./materializer.js";
 export {
   findCandidates,
@@ -23,10 +24,12 @@ export {
 export {
   cancelBySchool,
   teacherDrop,
+  teacherDropByTeacher,
   teacherNoShow,
   type CancelBySchoolInput,
   type CancelBySchoolResult,
   type TeacherDropInput,
+  type TeacherDropByTeacherInput,
   type TeacherDropResult,
   type TeacherNoShowInput,
   type TeacherNoShowResult,

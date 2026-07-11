@@ -204,6 +204,13 @@ export async function cancelBySchool(
 
 export interface TeacherDropInput {
   slotId: string;
+  /**
+   * Verilirse: slottaki confirmed atamanın BU eğitmene ait olduğu, düşürme ile AYNI
+   * transaction'da (slot FOR UPDATE kilidi altında) doğrulanır — yarışta başka
+   * eğitmenin dersi düşürülemez. Admin yolu vermez; self-servis yol (teacherDropByTeacher)
+   * her zaman verir. Hata mesajı eğitmen-yüzlü olduğu için İngilizce.
+   */
+  expectedTeacherId?: string;
 }
 
 export type TeacherDropResult =
@@ -227,15 +234,24 @@ export async function teacherDrop(
       throw new Error(`teacherDrop: slot scheduled değil (${slot.status})`);
     }
 
-    const dropped = await db.query(
-      `UPDATE assignment
-          SET status = 'dropped', updated_at = now()
-        WHERE slot_id = $1 AND status = 'confirmed'`,
+    // Slot başına tek canlı atama (assignment_active_per_slot) — tek satır beklenir.
+    const confirmed = await db.query<{ id: string; teacher_id: string }>(
+      `SELECT id, teacher_id FROM assignment
+        WHERE slot_id = $1 AND status = 'confirmed'
+        FOR UPDATE`,
       [slot.id],
     );
-    if (dropped.rowCount === 0) {
+    const live = confirmed.rows[0];
+    if (!live) {
       throw new Error(`teacherDrop: slotta confirmed atama yok (slot=${input.slotId})`);
     }
+    if (input.expectedTeacherId && live.teacher_id !== input.expectedTeacherId) {
+      throw new Error("this lesson is not assigned to you");
+    }
+
+    await db.query(`UPDATE assignment SET status = 'dropped', updated_at = now() WHERE id = $1`, [
+      live.id,
+    ]);
 
     await db.query(
       `UPDATE booking_slot SET status = 'cancelled_teacher', updated_at = now() WHERE id = $1`,
@@ -261,6 +277,24 @@ export async function teacherDrop(
     });
     return { reoffered: false };
   });
+}
+
+export interface TeacherDropByTeacherInput {
+  slotId: string;
+  teacherId: string;
+}
+
+/**
+ * Eğitmen panel self-servisi: eğitmen YALNIZ kendi onaylı dersini bırakabilir.
+ * Sahiplik doğrulaması teacherDrop'un transaction'ının içinde (expectedTeacherId)
+ * yapılır — doğrulama ile düşürme arasına yarış giremez. Sonrası admin yoluyla aynı:
+ * anında re-offer, aday yoksa tam iade.
+ */
+export async function teacherDropByTeacher(
+  pool: ActorPool,
+  input: TeacherDropByTeacherInput,
+): Promise<TeacherDropResult> {
+  return teacherDrop(pool, { slotId: input.slotId, expectedTeacherId: input.teacherId });
 }
 
 export interface TeacherNoShowInput {
