@@ -182,6 +182,8 @@ export default function OkulPage() {
         <a href="/okul/siniflar">Sınıflar ve öğrenciler (roster) →</a>
         {" · "}
         <a href="/okul/program">Ders programı (reçeteler ve slotlar) →</a>
+        {" · "}
+        <a href="/okul/ekstre">Hesap ekstresi →</a>
       </p>
       {me.schools.length > 1 ? (
         <p>

@@ -17,6 +17,7 @@
     "@teachernow/dispatch": "workspace:*",
     "@teachernow/hr": "workspace:*",
     "@teachernow/ledger": "workspace:*",
+    "@teachernow/payouts": "workspace:*",
     "@teachernow/sessions": "workspace:*",
     "@teachernow/tenancy": "workspace:*",
     "@trpc/client": "^11.0.0",

@@ -84,7 +84,7 @@ const SLOT_STATUS: Record<string, { label: string; ok: boolean }> = {
   cancelled_teacher: { label: "eğitmen düştü", ok: false },
   no_show_teacher: { label: "eğitmen gelmedi (iade)", ok: false },
   completed: { label: "tamamlandı", ok: true },
-  escalated: { label: "eskalasyon", ok: false },
+  escalated: { label: "SLA — ücret iade edildi", ok: false },
 };
 
 function minuteToHHMM(minute: number): string {

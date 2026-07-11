@@ -17,8 +17,9 @@ const HOUR_MS = 60 * 60_000;
  * Hold'u okula tam iade eder: [wallet_hold -price, school_cash +price].
  * Hold'suz (blocked) slotta no-op. İdempotency anahtarı reason'ı içerir;
  * hold_released_txn_id doluysa ikinci release'e izin verilmez.
+ * (backfill SLA escalate'i de aynı kapıyı kullanır — dispatch içi export.)
  */
-async function releaseHold(db: Db, slot: SlotRow, reason: string): Promise<string | null> {
+export async function releaseHold(db: Db, slot: SlotRow, reason: string): Promise<string | null> {
   if (!slot.hold_txn_id) return null; // blocked slot: hiç hold açılmamış
   if (slot.hold_released_txn_id) {
     throw new Error(`releaseHold: hold zaten serbest bırakılmış (slot=${slot.id})`);

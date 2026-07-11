@@ -41,6 +41,7 @@ const nextConfig: NextConfig = {
     "@teachernow/hr",
     "@teachernow/dispatch",
     "@teachernow/sessions",
+    "@teachernow/payouts",
   ],
   // pg native/koşullu import'ları bundle edilmez; runtime'da node_modules'tan çözülür.
   serverExternalPackages: ["pg"],

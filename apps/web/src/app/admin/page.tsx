@@ -169,6 +169,8 @@ export default function AdminPage() {
       <h1>Platform yönetimi</h1>
       <p className="muted">
         <a href="/admin/egitmenler">Eğitmen yönetimi (pipeline, davet, evrak, görüşme) →</a>
+        {" · "}
+        <a href="/admin/odemeler">Ödemeler (payout batch, Wise CSV, backfill) →</a>
       </p>
 
       {actionError ? <p className="error">{actionError}</p> : null}

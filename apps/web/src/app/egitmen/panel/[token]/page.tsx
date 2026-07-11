@@ -28,13 +28,33 @@ interface SettledLesson {
   earnedCents: number;
 }
 
+interface TeacherPayout {
+  id: string;
+  amountCents: number;
+  status: string;
+  failureReason: string | null;
+  paidAt: Date | null;
+  paidAtLocal: string;
+  createdAtLocal: string;
+  externalRef: string | null;
+}
+
 interface Panel {
   teacherName: string;
   timezone: string;
   payableCents: number;
   upcoming: UpcomingLesson[];
   settled: SettledLesson[];
+  payouts: TeacherPayout[];
 }
+
+const PAYOUT_STATUS_LABELS: Record<string, { label: string; ok: boolean }> = {
+  pending: { label: "hazırlanıyor", ok: false },
+  submitted: { label: "bankaya gönderildi", ok: false },
+  paid: { label: "ödendi", ok: true },
+  failed: { label: "başarısız", ok: false },
+  cancelled: { label: "iptal", ok: false },
+};
 
 export default function EgitmenPanelPage() {
   const params = useParams<{ token: string }>();
@@ -87,6 +107,47 @@ export default function EgitmenPanelPage() {
         <h2>Kazanç bakiyeniz</h2>
         <p className="balance">{formatCents(panel.payableCents)}</p>
         <p className="muted">Tamamlanan derslerin ücretleri burada birikir.</p>
+      </div>
+
+      <div className="card">
+        <h2>Ödemelerim</h2>
+        {panel.payouts.length === 0 ? (
+          <p className="muted">Henüz ödeme kaydı yok — ödemeler dönemsel olarak hazırlanır.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Tutar</th>
+                  <th>Durum</th>
+                  <th>Tarih</th>
+                  <th>Wise referansı</th>
+                </tr>
+              </thead>
+              <tbody>
+                {panel.payouts.map((p) => {
+                  const st = PAYOUT_STATUS_LABELS[p.status] ?? { label: p.status, ok: false };
+                  return (
+                    <tr key={p.id}>
+                      <td>{formatCents(p.amountCents)}</td>
+                      <td>
+                        <span className={`badge ${st.ok ? "ok" : "warn"}`}>{st.label}</span>
+                        {p.status === "failed" && p.failureReason ? (
+                          <span className="muted"> — {p.failureReason}</span>
+                        ) : null}
+                      </td>
+                      <td>{p.paidAt ? p.paidAtLocal : p.createdAtLocal}</td>
+                      <td className="mono">{p.externalRef ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="muted">
+          Başarısız ödemelerde alacağınız korunur — bir sonraki ödeme dönemine devreder.
+        </p>
       </div>
 
       <div className="card">

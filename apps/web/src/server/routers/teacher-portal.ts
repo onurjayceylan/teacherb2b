@@ -11,6 +11,7 @@ import {
   revokePortalTokens,
   signJoinToken,
 } from "@teachernow/sessions";
+import { getTeacherPayouts } from "@teachernow/payouts";
 import { platformProcedure, publicProcedure, router } from "../trpc";
 import { joinSecret } from "./session";
 
@@ -103,6 +104,20 @@ export const teacherPortalRouter = router({
         [teacher.teacherId],
       );
 
+      // Ödemelerim: payout geçmişi (tutar, durum, tarih) — modül sorgusu kendi platform
+      // tx'ini açar (pool alır); Wise referansı buradaki bağlantıyla zenginleştirilir.
+      const payouts = await getTeacherPayouts(ctx.pool, teacher.teacherId);
+      const refRows =
+        payouts.length === 0
+          ? []
+          : (
+              await db.query<{ id: string; external_ref: string | null }>(
+                "SELECT id, external_ref FROM payout WHERE id = ANY($1::uuid[])",
+                [payouts.map((p) => p.id)],
+              )
+            ).rows;
+      const externalRefs = new Map(refRows.map((r) => [r.id, r.external_ref]));
+
       return {
         teacherName: teacher.fullName,
         timezone: teacher.timezone,
@@ -126,6 +141,16 @@ export const teacherPortalRouter = router({
           endedAtLocal: r.ended_at ? formatInZone(r.ended_at, teacher.timezone) : "—",
           dosageMin: r.dosage_min ?? 0,
           earnedCents: Number(r.teacher_pay_cents),
+        })),
+        payouts: payouts.map((p) => ({
+          id: p.id,
+          amountCents: p.amountCents,
+          status: p.status,
+          failureReason: p.failureReason,
+          paidAt: p.paidAt,
+          paidAtLocal: p.paidAt ? formatInZone(p.paidAt, teacher.timezone) : "—",
+          createdAtLocal: formatInZone(p.createdAt, teacher.timezone),
+          externalRef: externalRefs.get(p.id) ?? null,
         })),
       };
     });

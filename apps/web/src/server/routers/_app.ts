@@ -6,6 +6,7 @@ import { lessonsRouter } from "./lessons";
 import { meRouter } from "./me";
 import { offerRouter } from "./offer";
 import { onboardingRouter } from "./onboarding";
+import { payoutsRouter } from "./payouts";
 import { rosterRouter } from "./roster";
 import { scheduleRouter } from "./schedule";
 import { sessionRouter } from "./session";
@@ -28,6 +29,7 @@ export const appRouter = router({
   offer: offerRouter,
   session: sessionRouter,
   teacherPortal: teacherPortalRouter,
+  payouts: payoutsRouter,
 });
 
 export type AppRouter = typeof appRouter;

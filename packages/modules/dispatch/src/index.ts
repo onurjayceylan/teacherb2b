@@ -31,4 +31,9 @@ export {
   type TeacherNoShowInput,
   type TeacherNoShowResult,
 } from "./cancellations.js";
+export {
+  sweepBackfill,
+  type SweepBackfillOptions,
+  type SweepBackfillResult,
+} from "./backfill.js";
 export { getSlot, getSlotForUpdate, type SlotRow } from "./slots.js";

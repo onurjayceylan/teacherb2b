@@ -37,6 +37,9 @@
       ],
       "@teachernow/sessions": [
         "packages/modules/sessions/src/index.ts"
+      ],
+      "@teachernow/payouts": [
+        "packages/modules/payouts/src/index.ts"
       ]
     }
   }

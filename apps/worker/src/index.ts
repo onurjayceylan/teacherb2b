@@ -2,14 +2,18 @@
 // taramasını koşturur.
 import PgBoss from "pg-boss";
 import { makePool } from "@teachernow/db";
+import { runBackfillSweep } from "./backfill-jobs.js";
 import { runDispatchMaterializer, runOfferTimeoutSweeper } from "./dispatch-jobs.js";
 import { runHrReminders } from "./hr-reminders.js";
+import { runPayoutReconciler } from "./payout-reconciler.js";
 import { runInvariantSentinel } from "./sentinel.js";
 
 const SENTINEL_QUEUE = "invariant-sentinel";
 const HR_REMINDERS_QUEUE = "hr-reminders";
 const DISPATCH_MATERIALIZER_QUEUE = "dispatch-materializer";
 const OFFER_TIMEOUT_QUEUE = "offer-timeout-sweeper";
+const BACKFILL_SWEEPER_QUEUE = "backfill-sweeper";
+const PAYOUT_RECONCILER_QUEUE = "payout-reconciler";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -59,6 +63,28 @@ async function main(): Promise<void> {
       console.log(
         `offer-timeout-sweeper: expired=${result.expired} reoffered=${result.reoffered}`,
       );
+    }
+  });
+
+  // 10 dakikada bir: eğitmensiz slotlara backfill (re-offer) + SLA eskalasyonu
+  await boss.createQueue(BACKFILL_SWEEPER_QUEUE);
+  await boss.schedule(BACKFILL_SWEEPER_QUEUE, "*/10 * * * *");
+  await boss.work(BACKFILL_SWEEPER_QUEUE, async () => {
+    const result = await runBackfillSweep(pool);
+    if (result.offered + result.reoffered + result.escalated > 0) {
+      console.log(
+        `backfill-sweeper: offered=${result.offered} reoffered=${result.reoffered} escalated=${result.escalated}`,
+      );
+    }
+  });
+
+  // 15 dakikada bir: 1 saatten uzun 'submitted' bekleyen payout'lar için alarm
+  await boss.createQueue(PAYOUT_RECONCILER_QUEUE);
+  await boss.schedule(PAYOUT_RECONCILER_QUEUE, "*/15 * * * *");
+  await boss.work(PAYOUT_RECONCILER_QUEUE, async () => {
+    const result = await runPayoutReconciler(pool);
+    if (result.stuck.length > 0) {
+      console.warn(`payout-reconciler: ${result.stuck.length} payout 'submitted'da takılı`);
     }
   });
 
