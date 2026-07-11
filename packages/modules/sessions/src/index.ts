@@ -38,6 +38,11 @@ export {
   type ResolveDisputeResult,
 } from "./disputes.js";
 export {
+  voidRejectedSession,
+  type VoidRejectedSessionInput,
+  type VoidRejectedSessionResult,
+} from "./void-review.js";
+export {
   createPortalToken,
   getTeacherByPortalToken,
   revokePortalTokens,

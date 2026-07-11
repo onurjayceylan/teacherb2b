@@ -92,6 +92,8 @@ test("(2) sahte sender: kayıt sent + sent_at dolu; subject/html'de token'lı te
       teacherTimezone: "Europe/Istanbul",
       poolName: "Native ESL",
       schoolName: "Test Okul",
+      payCents: 1600,
+      expiresAt: new Date(Date.now() + 20 * 60_000).toISOString(),
     },
   });
 
@@ -106,9 +108,12 @@ test("(2) sahte sender: kayıt sent + sent_at dolu; subject/html'de token'lı te
   expect(sentMessages).toHaveLength(1);
   const msg = sentMessages[0]!;
   expect(msg.to).toBe("offer@example.com");
-  expect(msg.subject).toContain("Yeni ders teklifi");
+  // P0-A: eğitmen e-postası İngilizce + ücret + son geçerlilik ZORUNLU.
+  expect(msg.subject).toContain("New lesson offer");
   expect(msg.html).toContain("https://app.test/egitmen/teklif/offer-tok-123");
-  expect(msg.html).toContain("60 dk");
+  expect(msg.html).toContain("60 min");
+  expect(msg.html).toContain("$16.00"); // Your rate
+  expect(msg.html).toContain("expires");
 
   const state = await stateOf(id);
   expect(state.status).toBe("sent");

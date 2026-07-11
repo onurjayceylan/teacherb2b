@@ -1,7 +1,8 @@
 // Invariant sentinel — severity ayrımı (06 T3-⑥ kararı: hold-aging ALARM'dır, freeze değil):
 //   CRITICAL: ledger_invariant_violations() satırları → payments_frozen kill-switch + audit
 //             (fail-closed; yalnız defter tutarsızlığı parayı durdurur).
-//   WARNING : operasyonel takılmalar (webhook_stuck, hold_aging, stuck_session) →
+//   WARNING : operasyonel takılmalar (webhook_stuck, hold_aging, stuck_session,
+//             email_pipeline_stalled) →
 //             freeze YOK; her biri audit_log'a 'sentinel_warning' yazar. Aynı entity için
 //             son 24 saatte aynı warning yazılmışsa tekrar YAZILMAZ (alarm spam koruması);
 //             dönüş değerinde yine raporlanır (mevcut durumun fotoğrafı).
@@ -63,6 +64,19 @@ async function collectWarnings(db: Db): Promise<SentinelWarning[]> {
       ORDER BY started_at`,
   );
 
+  // (d) P0-C: e-posta teslim hattı tıkalı — en eski pending 2 saati aştıysa TEK uyarı
+  // (satır başına değil; entity = en eski pending kayıt, dedupe onun üstünden işler).
+  const stalledOutbox = await db.query<{ id: string; pending: string; oldest_created_at: string }>(
+    `SELECT o.id, agg.pending, agg.oldest_created_at::text AS oldest_created_at
+       FROM (SELECT count(*) AS pending, min(created_at) AS oldest_created_at
+               FROM notification_outbox WHERE status = 'pending') agg
+       JOIN notification_outbox o
+         ON o.status = 'pending' AND o.created_at = agg.oldest_created_at
+      WHERE agg.pending > 0 AND agg.oldest_created_at < now() - interval '2 hours'
+      ORDER BY o.id
+      LIMIT 1`,
+  );
+
   return [
     ...stuckWebhooks.rows.map((r) => ({
       checkName: "webhook_stuck",
@@ -81,6 +95,12 @@ async function collectWarnings(db: Db): Promise<SentinelWarning[]> {
       entityType: "class_session",
       entityId: r.id,
       detail: `school=${r.school_id} started_at=${r.started_at}`,
+    })),
+    ...stalledOutbox.rows.map((r) => ({
+      checkName: "email_pipeline_stalled",
+      entityType: "notification_outbox",
+      entityId: r.id,
+      detail: `pending=${r.pending} oldest_created_at=${r.oldest_created_at}`,
     })),
   ];
 }

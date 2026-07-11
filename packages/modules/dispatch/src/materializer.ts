@@ -30,6 +30,36 @@ export interface MaterializeOptions {
   now?: Date;
 }
 
+/**
+ * Slot için okul kasasından hold alır ([school_cash -price, wallet_hold +price]) ve
+ * booking_slot.hold_txn_id'yi doldurur. İdempotency anahtarı 'hold:slot:<id>' —
+ * materializer VE retryBlockedSlots (P0-B) AYNI kapıyı kullanır; anahtar sabit olduğu
+ * için çift hold post_ledger_txn seviyesinde yapısal imkânsızdır. Yetersiz bakiye
+ * (23514) / kill-switch (P0001) hataları çağırana fırlar — çağıran transaction'ı geri sarar.
+ */
+export async function postSlotHold(
+  db: Db,
+  slot: { id: string; school_id: string; price_cents: string },
+): Promise<string> {
+  const cashId = await ensureAccount(db, "school", slot.school_id, "school_cash");
+  const holdId = await ensureAccount(db, "school", slot.school_id, "wallet_hold");
+  const { txnId } = await postTxn(db, {
+    key: `hold:slot:${slot.id}`,
+    type: "hold",
+    refType: "booking_slot",
+    refId: slot.id,
+    entries: [
+      { accountId: cashId, amountCents: `-${slot.price_cents}` },
+      { accountId: holdId, amountCents: slot.price_cents },
+    ],
+  });
+  await db.query(`UPDATE booking_slot SET hold_txn_id = $2, updated_at = now() WHERE id = $1`, [
+    slot.id,
+    txnId,
+  ]);
+  return txnId;
+}
+
 interface PlanRow {
   id: string;
   school_id: string;
@@ -177,24 +207,12 @@ async function materializeOccurrence(
 
   let holdTxnId: string;
   try {
-    const cashId = await ensureAccount(db, "school", plan.school_id, "school_cash");
-    const holdId = await ensureAccount(db, "school", plan.school_id, "wallet_hold");
-    const { txnId } = await postTxn(db, {
-      key: `hold:slot:${slotId}`,
-      type: "hold",
-      refType: "booking_slot",
-      refId: slotId,
-      entries: [
-        { accountId: cashId, amountCents: `-${plan.price_cents}` },
-        { accountId: holdId, amountCents: plan.price_cents },
-      ],
+    holdTxnId = await postSlotHold(db, {
+      id: slotId,
+      school_id: plan.school_id,
+      price_cents: plan.price_cents,
     });
-    await db.query(`UPDATE booking_slot SET hold_txn_id = $2, updated_at = now() WHERE id = $1`, [
-      slotId,
-      txnId,
-    ]);
     await db.query("RELEASE SAVEPOINT occurrence");
-    holdTxnId = txnId;
   } catch (err) {
     const code = (err as { code?: string }).code;
     // 23514: school_cash min_zero CHECK (yetersiz bakiye); P0001: payments_frozen kill-switch

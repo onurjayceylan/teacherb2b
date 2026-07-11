@@ -143,7 +143,7 @@ export async function offerNext(
       );
       // Teklif e-postası AYNI transaction'da outbox'a düşer (0012 outbox deseni):
       // teklif varsa kayıt da vardır. URL kurulmaz — dispatcher BASE_URL ile kurar.
-      await enqueueOfferNotification(db, slot, candidate, token);
+      await enqueueOfferNotification(db, slot, candidate, token, expiresAt);
       await db.query("RELEASE SAVEPOINT offer_try");
       return { assignmentId: res.rows[0]!.id, teacherId: candidate.teacherId, token };
     } catch (err) {
@@ -157,12 +157,15 @@ export async function offerNext(
   return null;
 }
 
-/** Teklif açılan eğitmene 'teacher_offer' outbox kaydı (offerNext transaction'ı içinde). */
+/** Teklif açılan eğitmene 'teacher_offer' outbox kaydı (offerNext transaction'ı içinde).
+ * P0-A: ücret (payCents) ve son geçerlilik (expiresAt) e-postada ZORUNLU — payload'a
+ * burada girer; dispatcher şablonu bunları eğitmen dilinde/diliminde biçimler. */
 async function enqueueOfferNotification(
   db: Db,
   slot: SlotRow,
   candidate: Candidate,
   token: string,
+  expiresAt: Date,
 ): Promise<void> {
   const ctx = await db.query<{ email: string; pool_name: string; school_name: string }>(
     `SELECT t.email, p.name AS pool_name, s.name AS school_name
@@ -184,6 +187,8 @@ async function enqueueOfferNotification(
       teacherTimezone: candidate.timezone,
       poolName: row.pool_name,
       schoolName: row.school_name,
+      payCents: Number(slot.teacher_pay_cents), // pg bigint → string → number
+      expiresAt: expiresAt.toISOString(),
     },
   });
 }

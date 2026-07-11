@@ -630,7 +630,7 @@ export default function BaslangicPage() {
                   {planSummary
                     ? `${planSummary.created} ders planlandı` +
                       (planSummary.blocked > 0
-                        ? ` — ${planSummary.blocked} ders bakiye yetersizliğinden bloke (bakiye yüklenince otomatik denenir)`
+                        ? ` — ${planSummary.blocked} ders bakiye yetersizliğinden bloke (bakiye yükleyip onaylandığında ~10 dakika içinde otomatik yeniden denenir)`
                         : "")
                     : "—"}
                 </td>

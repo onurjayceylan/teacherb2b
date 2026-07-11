@@ -57,13 +57,23 @@ await step("GET /api/healthz", async () => {
       `workersOk:false — bayat/hiç koşmamış worker: ${stale.join(", ") || "worker_heartbeat boş"}`,
     );
   }
+  // P0-C: e-posta teslim hattı — anahtar yokken outbox birikiyorsa ya da anahtar
+  // varken en eski pending 60 dk'yı aştıysa FAIL (exit 1; paymentsFrozen exit 2 önceliği
+  // yukarıda zaten yakalandı).
+  if (body.emailPipeline && body.emailPipeline.ok !== true) {
+    const ep = body.emailPipeline;
+    throw new Error(
+      `emailPipeline.ok:false — configured:${ep.configured} pending:${ep.pending} ` +
+        `oldestPendingMinutes:${ep.oldestPendingMinutes ?? "null"} (e-posta teslim hattı tıkalı)`,
+    );
+  }
   if (body.paymentsFrozen === true) {
     return "db:up workersOk:true — DİKKAT paymentsFrozen:true (para donuk!)";
   }
   if (body.ok !== true) {
     throw new Error(`beklenmeyen gövde: ${JSON.stringify(body)}`);
   }
-  return "ok:true db:up paymentsFrozen:false workersOk:true";
+  return "ok:true db:up paymentsFrozen:false workersOk:true emailPipeline.ok:true";
 });
 
 await step("GET /", async () => {

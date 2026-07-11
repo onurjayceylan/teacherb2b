@@ -192,6 +192,25 @@ test("24 saat tekrar koruması: ikinci koşum warning'leri raporlar ama audit'e 
   expect(await paymentsFrozen()).toBe(false);
 });
 
+test("email_pipeline_stalled: 2 saatten eski pending outbox WARNING olur, freeze ETMEZ", async () => {
+  // P0-C: e-posta hattı tıkalı (anahtar yok / Resend down) — 3 saat önce yazılmış pending.
+  await tdb.pool.withPlatform((db) =>
+    db.query(
+      `INSERT INTO notification_outbox (recipient_email, template, payload, status, created_at)
+       VALUES ('stalled@example.com', 'teacher_invite', '{}'::jsonb, 'pending', now() - interval '3 hours')`,
+    ),
+  );
+
+  const result = await runInvariantSentinel(tdb.pool);
+  const stalled = result.warnings.filter((w) => w.checkName === "email_pipeline_stalled");
+  expect(stalled.length).toBe(1);
+  expect(stalled[0]?.detail).toContain("pending=");
+  expect(result.critical).toEqual([]);
+  expect(result.engagedKillSwitch).toBe(false);
+  expect(await paymentsFrozen()).toBe(false);
+  expect(await warningAuditCount("email_pipeline_stalled")).toBe(1);
+});
+
 test("bakiye drift'i CRITICAL'dır: flag açılır, audit yazılır; post_ledger_txn artık patlar", async () => {
   // Kill-switch alarmının alıcısını sabitle (ALERT_EMAIL yolu da böylece test edilir).
   process.env.ALERT_EMAIL = "sentinel-alerts@test.example";

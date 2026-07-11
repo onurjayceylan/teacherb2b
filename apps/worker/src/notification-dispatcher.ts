@@ -82,52 +82,71 @@ function whenEn(iso: unknown, tz: unknown): string {
   }
 }
 
+/** whenEn + dilim etiketi: eğitmen saatin HANGİ dilimde olduğunu görmeli (P0-A).
+ * teacherTimezone payload'da yoksa UTC'ye düşer ve etiket yine yazılır. */
+function whenEnTz(iso: unknown, tz: unknown): string {
+  const zone = typeof tz === "string" && tz ? tz : "UTC";
+  return `${whenEn(iso, zone)} (${zone})`;
+}
+
 export interface RenderedEmail {
   subject: string;
   html: string;
 }
 
-/** Basit Türkçe şablonlar. Token'lı linkler yalnız burada URL'e dönüşür (BASE_URL). */
+/** Şablonlar: eğitmen-yüzlüler İNGİLİZCE (en-US + eğitmen dilimi etiketli), okul-yüzlüler
+ * TÜRKÇE. Token'lı linkler yalnız burada URL'e dönüşür (BASE_URL). */
 export function renderTemplate(
   template: string,
   payload: Record<string, unknown>,
 ): RenderedEmail {
   switch (template) {
     case "teacher_offer": {
-      const at = when(payload["slotStartsAt"], payload["teacherTimezone"]);
+      // P0-A zorunlu içerik: yerel saat + süre + okul/havuz + ücret + son geçerlilik + link.
+      const at = whenEnTz(payload["slotStartsAt"], payload["teacherTimezone"]);
+      const expires = whenEnTz(payload["expiresAt"], payload["teacherTimezone"]);
       const url = `${baseUrl()}/egitmen/teklif/${String(payload["token"] ?? "")}`;
+      const pay = payload["payCents"];
       return {
-        subject: `Yeni ders teklifi — ${at}`,
+        subject: `New lesson offer — ${at}`,
         html:
-          `<p>Merhaba,</p>` +
-          `<p>Size yeni bir ders teklifi var: <strong>${esc(at)}</strong>` +
-          ` (${esc(payload["durationMin"])} dk` +
-          (payload["poolName"] ? `, ${esc(payload["poolName"])}` : "") +
+          `<p>Hello,</p>` +
+          `<p>You have a new lesson offer: <strong>${esc(at)}</strong>` +
+          ` (${esc(payload["durationMin"])} min` +
           (payload["schoolName"] ? `, ${esc(payload["schoolName"])}` : "") +
+          (payload["poolName"] ? `, ${esc(payload["poolName"])} pool` : "") +
           `).</p>` +
-          `<p><a href="${esc(url)}">Teklifi görüntüle ve yanıtla</a></p>` +
-          `<p>Teklifler süreli — lütfen en kısa sürede yanıtlayın.</p>`,
+          (pay !== undefined && pay !== null
+            ? `<p><strong>Your rate: ${esc(usd(pay))} for this lesson.</strong></p>`
+            : "") +
+          (payload["expiresAt"]
+            ? `<p><strong>Offer expires: ${esc(expires)}.</strong></p>`
+            : `<p><strong>This offer is time-limited.</strong></p>`) +
+          `<p><a href="${esc(url)}">View and respond to the offer</a></p>` +
+          `<p>Please respond as soon as you can — after the deadline the lesson is offered to the next teacher.</p>`,
       };
     }
     case "teacher_invite": {
       const url = `${baseUrl()}/egitmen/davet/${String(payload["token"] ?? "")}`;
       return {
-        subject: "Teachernow eğitmen daveti",
+        subject: "You're invited to teach with Teachernow",
         html:
-          `<p>Merhaba ${esc(payload["fullName"])},</p>` +
-          `<p>Teachernow eğitmen kadrosuna davetlisiniz. Kaydınızı tamamlamak için:</p>` +
-          `<p><a href="${esc(url)}">Daveti aç</a></p>`,
+          `<p>Hello ${esc(payload["fullName"])},</p>` +
+          `<p>You have been invited to join the Teachernow teaching team. ` +
+          `To complete your registration, open your personal invitation link:</p>` +
+          `<p><a href="${esc(url)}">Open your invitation</a></p>` +
+          `<p>If you were not expecting this email, you can safely ignore it.</p>`,
       };
     }
     case "teacher_portal": {
       const url = `${baseUrl()}/egitmen/panel/${String(payload["token"] ?? "")}`;
       return {
-        subject: "Teachernow eğitmen paneliniz",
+        subject: "Your Teachernow teacher panel",
         html:
-          `<p>Merhaba ${esc(payload["fullName"])},</p>` +
-          `<p>Derslerinizi, kazançlarınızı ve ödemelerinizi buradan izleyebilirsiniz:</p>` +
-          `<p><a href="${esc(url)}">Eğitmen panelini aç</a></p>` +
-          `<p>Bu bağlantı kişiseldir — lütfen kimseyle paylaşmayın.</p>`,
+          `<p>Hello ${esc(payload["fullName"])},</p>` +
+          `<p>You can track your lessons, earnings and payouts in your teacher panel:</p>` +
+          `<p><a href="${esc(url)}">Open your teacher panel</a></p>` +
+          `<p>This link is personal — please do not share it with anyone.</p>`,
       };
     }
     case "school_sla_escalated": {
@@ -157,14 +176,41 @@ export function renderTemplate(
     }
     case "teacher_doc_reminder": {
       return {
-        subject: "Evrak hatırlatması — Teachernow",
+        subject: "Document reminder — Teachernow",
         html:
-          `<p>Merhaba,</p>` +
-          `<p>Eğitmen dosyanızda eksik ya da reddedilmiş evrak bulunuyor. Ödemelerin ` +
-          `açılabilmesi için lütfen evraklarınızı tamamlayın.</p>`,
+          `<p>Hello,</p>` +
+          `<p>Your teacher file has missing or rejected documents. Please complete ` +
+          `your documents so that your payouts can be enabled.</p>` +
+          `<p>You can upload documents from your teacher panel.</p>`,
       };
     }
-    // Eğitmen-yüzlü şablonlar İNGİLİZCE (Tur A kararı) — okul-yüzlüler Türkçe kalır.
+    // P1-A/P1-B: eğitmene para düzeltmesi bildirimi (dispute clawback / review reddi).
+    case "teacher_payment_adjusted": {
+      const at = whenEnTz(payload["lessonStartsAt"], payload["teacherTimezone"]);
+      if (payload["kind"] === "dispute_refund") {
+        return {
+          subject: `Payment adjustment — lesson on ${at}`,
+          html:
+            `<p>Hello,</p>` +
+            `<p>A school dispute was resolved with a refund; ` +
+            `<strong>${esc(usd(payload["amountCents"]))}</strong> was deducted from your ` +
+            `pending earnings for the lesson on <strong>${esc(at)}</strong>` +
+            (payload["schoolName"] ? ` with ${esc(payload["schoolName"])}` : "") +
+            `.</p>` +
+            `<p>If you believe this is a mistake, reply to this email.</p>`,
+        };
+      }
+      // kind === 'review_rejected': ders incelemede reddedildi — ödeme yapılmayacak.
+      return {
+        subject: `Lesson review outcome — lesson on ${at}`,
+        html:
+          `<p>Hello,</p>` +
+          `<p>Your lesson on <strong>${esc(at)}</strong>` +
+          (payload["schoolName"] ? ` with ${esc(payload["schoolName"])}` : "") +
+          ` was reviewed and will not be paid.</p>` +
+          `<p>If you believe this is a mistake, reply to this email.</p>`,
+      };
+    }
     case "teacher_slot_cancelled": {
       const at = whenEn(payload["slotStartsAt"], payload["teacherTimezone"]);
       return {

@@ -56,6 +56,16 @@ interface AvailabilityWindow {
   timezone: string;
 }
 
+// Para ayarlaması satırı (tur-2 P1-A): amountCents NEGATİF — bakiyeden düşülen tutar.
+interface Adjustment {
+  amountCents: number;
+  occurredAt: Date;
+  occurredAtLocal: string;
+  lessonStartsAt: Date | null;
+  lessonDayLocal: string | null;
+  kind: "dispute_refund";
+}
+
 interface Panel {
   teacherName: string;
   timezone: string;
@@ -66,6 +76,7 @@ interface Panel {
   payoutDetails: MaskedPayout | null;
   upcoming: UpcomingLesson[];
   settled: SettledLesson[];
+  adjustments: Adjustment[];
   payouts: TeacherPayout[];
 }
 
@@ -310,6 +321,26 @@ export default function EgitmenPanelPage() {
           per-lesson rate for each completed lesson accumulates here. {panel.strikeLimit} no-show
           strikes lead to suspension.
         </p>
+        {panel.adjustments.length > 0 ? (
+          <div style={{ marginTop: "1rem" }}>
+            <h3 style={{ marginBottom: "0.35rem" }}>Adjustments</h3>
+            <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+              {panel.adjustments.map((a, i) => (
+                <li
+                  key={`${a.kind}-${i}`}
+                  style={{ color: "#b42318", padding: "0.15rem 0", fontSize: "0.92rem" }}
+                >
+                  {formatCents(a.amountCents)} — dispute refund
+                  {a.lessonDayLocal ? ` (lesson on ${a.lessonDayLocal})` : ` (${a.occurredAtLocal})`}
+                </li>
+              ))}
+            </ul>
+            <p className="muted" style={{ marginTop: "0.4rem", marginBottom: 0 }}>
+              When a school dispute is resolved with a refund, the pending earning for that
+              lesson is reversed.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       <div className="card">

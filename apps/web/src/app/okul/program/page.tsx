@@ -109,6 +109,8 @@ const SLOT_STATUS: Record<string, { label: string; ok: boolean }> = {
   no_show_teacher: { label: "eğitmen gelmedi (iade)", ok: false },
   completed: { label: "tamamlandı", ok: true },
   escalated: { label: "SLA — ücret iade edildi", ok: false },
+  // Tur-2 P1-B: settle'ı reddedilen ders admin kararıyla kapatıldı — ücret alınmadı.
+  voided_review: { label: "inceleme sonucu iptal (tam iade)", ok: false },
 };
 
 function minuteToHHMM(minute: number): string {
@@ -255,7 +257,9 @@ export default function ProgramPage() {
       setNotice(
         `Reçete kaydedildi — ${m.created} slot oluştu` +
           (m.blocked > 0 ? `, ${m.blocked} tanesi bakiye yetersizliğinden bloke` : "") +
-          (m.blocked > 0 ? ". Bakiye yükledikten sonra materializer yeniden dener." : "."),
+          (m.blocked > 0
+            ? ". Bakiye yükleyip onaylandığında bloke dersler ~10 dakika içinde otomatik yeniden denenir."
+            : "."),
       );
     }, null);
   }
@@ -535,7 +539,11 @@ export default function ProgramPage() {
                     <td>
                       {p.scheduledCount}/{p.totalSlots}
                       {p.blockedCount > 0 ? (
-                        <span className="badge warn" style={{ marginLeft: "0.35rem" }}>
+                        <span
+                          className="badge warn"
+                          style={{ marginLeft: "0.35rem" }}
+                          title="Bakiye yükleyip onaylandığında bloke dersler ~10 dakika içinde otomatik yeniden denenir."
+                        >
                           {p.blockedCount} bloke
                         </span>
                       ) : null}
@@ -673,7 +681,11 @@ export default function ProgramPage() {
                                 <>
                                   <span className="badge ok">{r.scheduledCount} slot planlandı</span>
                                   {r.blockedCount > 0 ? (
-                                    <span className="badge warn" style={{ marginLeft: "0.35rem" }}>
+                                    <span
+                                      className="badge warn"
+                                      style={{ marginLeft: "0.35rem" }}
+                                      title="Bakiye yükleyip onaylandığında bloke dersler ~10 dakika içinde otomatik yeniden denenir."
+                                    >
                                       bakiye yetersiz — {r.blockedCount} slot bloke
                                     </span>
                                   ) : null}

@@ -82,14 +82,19 @@ async function main(): Promise<void> {
     await recordHeartbeat(pool, OFFER_TIMEOUT_QUEUE, result);
   });
 
-  // 10 dakikada bir: eğitmensiz slotlara backfill (re-offer) + SLA eskalasyonu
+  // 10 dakikada bir: bloke slot retry (P0-B) + eğitmensiz slotlara backfill (re-offer)
+  // + SLA eskalasyonu
   await boss.createQueue(BACKFILL_SWEEPER_QUEUE);
   await boss.schedule(BACKFILL_SWEEPER_QUEUE, "*/10 * * * *");
   await boss.work(BACKFILL_SWEEPER_QUEUE, async () => {
     const result = await runBackfillSweep(pool);
-    if (result.offered + result.reoffered + result.escalated > 0) {
+    if (
+      result.offered + result.reoffered + result.escalated + result.retried + result.stillBlocked >
+      0
+    ) {
       console.log(
-        `backfill-sweeper: offered=${result.offered} reoffered=${result.reoffered} escalated=${result.escalated}`,
+        `backfill-sweeper: offered=${result.offered} reoffered=${result.reoffered} ` +
+          `escalated=${result.escalated} retried=${result.retried} stillBlocked=${result.stillBlocked}`,
       );
     }
     await recordHeartbeat(pool, BACKFILL_SWEEPER_QUEUE, result);

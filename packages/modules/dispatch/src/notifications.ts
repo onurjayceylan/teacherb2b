@@ -3,7 +3,7 @@
 // yalnız DB'ye yazılır, ASLA loglanmaz.
 import type { Db } from "@teachernow/db";
 
-// 0013 CHECK'indeki şablon listesinin aynası — CHECK genişlerse burası da genişler.
+// 0013/0016 CHECK'indeki şablon listesinin aynası — CHECK genişlerse burası da genişler.
 export type NotificationTemplate =
   | "teacher_offer"
   | "teacher_invite"
@@ -15,7 +15,8 @@ export type NotificationTemplate =
   | "teacher_interview_scheduled"
   | "school_dispute_resolved"
   | "school_topup_settled"
-  | "platform_alert";
+  | "platform_alert"
+  | "teacher_payment_adjusted";
 
 export interface EnqueueNotificationInput {
   recipientEmail: string;

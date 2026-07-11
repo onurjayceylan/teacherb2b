@@ -6,7 +6,7 @@ import { adminSettleBankTopup } from "@teachernow/billing";
 import { getSlotForUpdate, materializePlans, offerNext } from "@teachernow/dispatch";
 import { timezoneSchema } from "@teachernow/hr";
 import { isPaymentsFrozen, setPaymentsFrozen } from "@teachernow/ledger";
-import { resolveDispute, settleSession } from "@teachernow/sessions";
+import { resolveDispute, settleSession, voidRejectedSession } from "@teachernow/sessions";
 import { platformProcedure, router } from "../trpc";
 import { baseUrl } from "./teacher-portal";
 
@@ -183,7 +183,8 @@ export const adminRouter = router({
 
   // Tek bakışta operasyon durumu: bugünkü dersler (Europe/Istanbul günü — admin yüzü
   // Türkiye'den bakar), şu an canlı ders, en eski bekleyen havale yaşı, failed payout,
-  // worker heartbeat tazeliği (eşikler cron aralığı + pay) ve bekleyen bildirim sayısı.
+  // worker heartbeat tazeliği (eşikler cron aralığı + pay), bekleyen bildirim sayısı ve
+  // e-posta teslim hattı durumu (tur-2 P0-C: anahtar/tıkanıklık görünür olmalı).
   healthStrip: platformProcedure.query(async ({ ctx }) => {
     return ctx.pool.withPlatform(async (db) => {
       const today = await db.query<{ n: string }>(
@@ -206,6 +207,13 @@ export const adminRouter = router({
       const pendingNotifications = await db.query<{ n: string }>(
         "SELECT count(*) AS n FROM notification_outbox WHERE status = 'pending'",
       );
+      // E-posta hattı (denetim tur-2 P0-C): anahtar yokken ya da dispatcher tıkalıyken
+      // hiçbir gösterge kırmızıya dönmüyordu — en eski pending'in yaşı da ölçülür.
+      const oldestPendingNotif = await db.query<{ age_min: number | null }>(
+        `SELECT EXTRACT(EPOCH FROM (now() - min(created_at))) / 60.0 AS age_min
+           FROM notification_outbox
+          WHERE status = 'pending'`,
+      );
       const hb = await db.query<{ job: string; last_run_at: Date }>(
         "SELECT job, last_run_at FROM worker_heartbeat WHERE job = ANY($1::text[])",
         [Object.keys(HEALTH_WORKER_STALE_MS)],
@@ -221,12 +229,21 @@ export const adminRouter = router({
         };
       });
       const oldestAge = oldestPending.rows[0]?.age_days;
+      const oldestNotifAge = oldestPendingNotif.rows[0]?.age_min;
       return {
         todayLessonCount: Number(today.rows[0]?.n ?? 0),
         liveLessonCount: Number(live.rows[0]?.n ?? 0),
         oldestPendingTopupDays: oldestAge === null || oldestAge === undefined ? null : Number(oldestAge),
         failedPayoutCount: Number(failedPayouts.rows[0]?.n ?? 0),
         pendingNotificationCount: Number(pendingNotifications.rows[0]?.n ?? 0),
+        // E-posta teslim hattı durumu (P0-C): configured = RESEND anahtarı takılı mı;
+        // pending + en eski bekleme süresi karoyu kırmızıya döndüren iki sinyaldir.
+        emailPipeline: {
+          configured: Boolean(process.env.RESEND_API_KEY),
+          pending: Number(pendingNotifications.rows[0]?.n ?? 0),
+          oldestPendingMinutes:
+            oldestNotifAge === null || oldestNotifAge === undefined ? null : Number(oldestNotifAge),
+        },
         workers,
       };
     });
@@ -771,15 +788,15 @@ export const adminRouter = router({
     }),
 
   // Ret: PARA İŞLEMEZ — yalnız review bayrağı düşer + audit izi atılır. Oturum 'ended',
-  // slot 'scheduled' kalır; slot böylece hold-aging uyarısına düşer ve karar (iptal/iade
-  // /manuel düzeltme) o kuyrukta verilir.
+  // slot 'scheduled' kalır; review_rejected_at damgası (0016) oturumu görünür çözüm
+  // kuyruğuna (listRejectedSessions) düşürür — nihai karar orada verilir.
   rejectSettle: platformProcedure
     .input(z.object({ sessionId: z.string().uuid(), note: z.string().trim().min(2).max(1000) }))
     .mutation(async ({ ctx, input }) => {
       return ctx.pool.withPlatform(async (db) => {
         const res = await db.query<{ school_id: string; review_reason: string | null }>(
           `UPDATE class_session
-              SET review_required = false, updated_at = now()
+              SET review_required = false, review_rejected_at = now(), updated_at = now()
             WHERE id = $1 AND review_required
             RETURNING school_id, review_reason`,
           [input.sessionId],
@@ -801,14 +818,76 @@ export const adminRouter = router({
             JSON.stringify({
               note: input.note,
               review_reason: row.review_reason,
-              // Para bilinçli işlenmedi: slot 'scheduled' kaldığı için hold-aging
-              // uyarısına düşer; nihai karar orada verilir.
+              // Para bilinçli işlenmedi: oturum review_rejected_at damgasıyla görünür
+              // çözüm kuyruğuna düşer; nihai karar (tam iade / yeniden settle) orada.
               money_untouched: true,
             }),
           ],
         );
         return { sessionId: input.sessionId };
       });
+    }),
+
+  // ---- Ret sonrası para çözümü (denetim tur-2 P1-B) ----
+
+  // Çözüm bekleyen retler: settle'ı REDDEDİLMİŞ (review_rejected_at dolu) ama parası
+  // hâlâ hold'da bekleyen ended oturumlar. Slot voided_review/iade olunca (ya da oturum
+  // yeniden settle edilince) satır bu listeden kendiliğinden düşer.
+  listRejectedSessions: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        id: string;
+        review_rejected_at: Date;
+        review_reason: string | null;
+        starts_at: Date;
+        ends_at: Date;
+        price_cents: string; // pg bigint → string
+        school_name: string;
+        class_name: string;
+        teacher_name: string;
+      }>(
+        `SELECT cs.id, cs.review_rejected_at, cs.review_reason,
+                s.starts_at, s.ends_at, s.price_cents,
+                sch.name AS school_name, cg.name AS class_name, t.full_name AS teacher_name
+           FROM class_session cs
+           JOIN booking_slot s ON s.id = cs.slot_id
+           JOIN school sch ON sch.id = cs.school_id
+           JOIN class_group cg ON cg.id = cs.class_group_id
+           JOIN teacher t ON t.id = cs.teacher_id
+          WHERE cs.review_rejected_at IS NOT NULL
+            AND cs.settle_txn_id IS NULL
+            AND cs.status = 'ended'
+            AND s.status = 'scheduled'
+          ORDER BY cs.review_rejected_at`,
+      );
+      return res.rows.map((r) => ({
+        sessionId: r.id,
+        schoolName: r.school_name,
+        className: r.class_name,
+        teacherName: r.teacher_name,
+        lessonStartsAt: r.starts_at,
+        lessonEndsAt: r.ends_at,
+        priceCents: Number(r.price_cents),
+        rejectedAt: r.review_rejected_at,
+        reason: r.review_reason,
+      }));
+    });
+  }),
+
+  // Tam iade kararı: modül tek transaction'da hold'u okula geri verir, slot'u
+  // voided_review'a kapatır ve eğitmene bilgilendirme e-postasını outbox'a düşürür.
+  voidRejectedSessionProc: platformProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      try {
+        const res = await voidRejectedSession(ctx.pool, { sessionId: input.sessionId });
+        return { sessionId: input.sessionId, refundCents: res.refundCents, txnId: res.txnId };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
     }),
 
   // ---- Bildirim outbox'ı ----

@@ -65,6 +65,19 @@ function formatInZone(at: Date, tz: string): string {
   }
 }
 
+// Yalnız gün ("Jul 12") — adjustment satırının kısa ders bağlamı için.
+function formatDayInZone(at: Date, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: tz,
+    }).format(at);
+  } catch {
+    return at.toISOString().slice(0, 10);
+  }
+}
+
 export const teacherPortalRouter = router({
   getPanel: publicProcedure.input(z.object({ token: tokenSchema })).query(async ({ ctx, input }) => {
     return ctx.pool.withPlatform(async (db) => {
@@ -149,6 +162,29 @@ export const teacherPortalRouter = router({
         [teacher.teacherId],
       );
 
+      // Para ayarlamaları (denetim tur-2 P1-A): itiraz iadesinde eğitmen alacağından
+      // sessizce düşülen tutar panelde görünür olmalı. teacher_payable hesabındaki
+      // NEGATİF dispute_refund bacakları okunur; ders zamanı txn ref'inden (class_session
+      // → booking_slot) çekilebiliyorsa eklenir.
+      const adjustments = await db.query<{
+        amount_cents: string;
+        occurred_at: Date;
+        lesson_starts_at: Date | null;
+      }>(
+        `SELECT e.amount_cents, e.created_at AS occurred_at, sl.starts_at AS lesson_starts_at
+           FROM ledger_entry e
+           JOIN ledger_account a ON a.id = e.account_id
+           JOIN ledger_transaction tx ON tx.id = e.txn_id
+           LEFT JOIN class_session cs
+                  ON tx.ref_type = 'class_session' AND cs.id = tx.ref_id
+           LEFT JOIN booking_slot sl ON sl.id = cs.slot_id
+          WHERE a.owner_type = 'teacher' AND a.owner_id = $1 AND a.kind = 'teacher_payable'
+            AND tx.type = 'dispute_refund' AND e.amount_cents < 0
+          ORDER BY e.created_at DESC
+          LIMIT 20`,
+        [teacher.teacherId],
+      );
+
       // Ödemelerim: payout geçmişi (tutar, durum, tarih) — modül sorgusu kendi platform
       // tx'ini açar (pool alır); Wise referansı buradaki bağlantıyla zenginleştirilir.
       const payouts = await getTeacherPayouts(ctx.pool, teacher.teacherId);
@@ -197,6 +233,17 @@ export const teacherPortalRouter = router({
           endedAtLocal: r.ended_at ? formatInZone(r.ended_at, teacher.timezone) : "—",
           dosageMin: r.dosage_min ?? 0,
           earnedCents: Number(r.teacher_pay_cents),
+        })),
+        // Para ayarlamaları: amountCents NEGATİF (bakiyeden düşülen tutar).
+        adjustments: adjustments.rows.map((r) => ({
+          amountCents: Number(r.amount_cents),
+          occurredAt: r.occurred_at,
+          occurredAtLocal: formatInZone(r.occurred_at, teacher.timezone),
+          lessonStartsAt: r.lesson_starts_at,
+          lessonDayLocal: r.lesson_starts_at
+            ? formatDayInZone(r.lesson_starts_at, teacher.timezone)
+            : null,
+          kind: "dispute_refund" as const,
         })),
         payouts: payouts.map((p) => ({
           id: p.id,

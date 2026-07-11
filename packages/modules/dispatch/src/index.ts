@@ -39,4 +39,9 @@ export {
   type SweepBackfillOptions,
   type SweepBackfillResult,
 } from "./backfill.js";
+export {
+  retryBlockedSlots,
+  type RetryBlockedOptions,
+  type RetryBlockedResult,
+} from "./retry-blocked.js";
 export { getSlot, getSlotForUpdate, type SlotRow } from "./slots.js";

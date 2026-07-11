@@ -52,6 +52,10 @@ export default function GlobalError({
           <p style={{ margin: "0 0 0.8rem" }}>
             Beklenmeyen bir hata oluştu; sayfa görüntülenemiyor. Yeniden deneyin.
           </p>
+          {/* Eğitmen-yüzlü rotalar da bu boundary'ye düşer — kısa İngilizce satır şart. */}
+          <p style={{ color: "#6b7280", fontSize: "0.9rem", margin: "0 0 0.8rem" }}>
+            Something went wrong — please try again.
+          </p>
           {error.digest ? (
             <p style={{ color: "#6b7280", fontSize: "0.9rem", margin: "0 0 1rem" }}>
               Destek için hata kodu:{" "}

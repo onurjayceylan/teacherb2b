@@ -26,6 +26,8 @@ export default function ErrorBoundary({
           Beklenmeyen bir hata oluştu. Sayfayı yeniden deneyebilir ya da ana sayfaya
           dönebilirsiniz — verileriniz güvende.
         </p>
+        {/* Eğitmen-yüzlü rotalar da bu boundary'ye düşer — kısa İngilizce satır şart. */}
+        <p className="muted">Something went wrong — please try again. Your data is safe.</p>
         <p className="muted">{errorMessage(error)}</p>
         {error.digest ? (
           <p className="muted">

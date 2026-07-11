@@ -99,6 +99,19 @@ async function resolvedNotices(): Promise<
   });
 }
 
+/** P1-A: eğitmene giden kesinti bildirimleri (clawback şeffaflığı). */
+async function teacherAdjustedNotices(): Promise<
+  { recipient_email: string; payload: Record<string, unknown> }[]
+> {
+  return tdb.pool.withPlatform(async (db) => {
+    const res = await db.query<{ recipient_email: string; payload: Record<string, unknown> }>(
+      `SELECT recipient_email, payload FROM notification_outbox
+        WHERE template = 'teacher_payment_adjusted' ORDER BY created_at`,
+    );
+    return res.rows;
+  });
+}
+
 test("refund kararı: owner+admin'e outcome='refunded' + slot tarihi düşer; finance almaz", async () => {
   const disputeId = await tdb.pool.withPlatform((db) =>
     openDispute(db, { sessionId, schoolId: seed.schoolId, reason: "eğitmen geç geldi" }),
@@ -124,6 +137,16 @@ test("refund kararı: owner+admin'e outcome='refunded' + slot tarihi düşer; fi
       refundedCents: 4_000,
     });
   }
+
+  // P1-A: refund kararında eğitmene kesinti bildirimi (kind='dispute_refund', teacher_pay 1600)
+  const adjusted = await teacherAdjustedNotices();
+  expect(adjusted).toHaveLength(1);
+  expect(adjusted[0]!.recipient_email).toBe("dispute.ntf.t@example.com");
+  expect(adjusted[0]!.payload).toMatchObject({
+    kind: "dispute_refund",
+    amountCents: 1_600,
+    lessonStartsAt: slotStartsAt.toISOString(),
+  });
   await assertInvariantsClean(tdb.pool);
 });
 
@@ -147,4 +170,7 @@ test("rejected kararı: outcome='released' düşer (refundedCents payload'da yok
     expect(row.payload["slotStartsAt"]).toBe(slotStartsAt.toISOString());
     expect(row.payload["refundedCents"]).toBeUndefined();
   }
+
+  // P1-A: reddedilen itiraz eğitmenden para almaz → yeni clawback bildirimi YOK (hâlâ 1)
+  expect(await teacherAdjustedNotices()).toHaveLength(1);
 });

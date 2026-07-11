@@ -93,6 +93,43 @@ async function enqueueDisputeResolvedNotifications(
   }
 }
 
+/**
+ * P1-A (clawback şeffaflığı): refund kararında eğitmenin alacağı sessizce düşüyordu.
+ * Eğitmene 'teacher_payment_adjusted' (kind='dispute_refund') outbox kaydı kararla AYNI
+ * transaction'da düşer — şablon eğitmen-yüzlü olduğu için dispatcher tarafında İngilizce.
+ * amountCents = ters kayıtla eğitmenden geri alınan tutar (settle'ın teacher_payable bacağı).
+ */
+async function enqueueTeacherAdjustedNotification(
+  db: Db,
+  input: {
+    teacherId: string;
+    amountCents: number;
+    lessonStartsAt: Date;
+    schoolName: string;
+  },
+): Promise<void> {
+  const teacher = await db.query<{ email: string; timezone: string }>(
+    "SELECT email, timezone FROM teacher WHERE id = $1",
+    [input.teacherId],
+  );
+  const row = teacher.rows[0];
+  if (!row) throw new Error(`resolveDispute: eğitmen bulunamadı: ${input.teacherId}`);
+  await db.query(
+    `INSERT INTO notification_outbox (recipient_email, template, payload)
+     VALUES ($1, 'teacher_payment_adjusted', $2::jsonb)`,
+    [
+      row.email,
+      JSON.stringify({
+        kind: "dispute_refund",
+        amountCents: input.amountCents,
+        lessonStartsAt: input.lessonStartsAt.toISOString(),
+        teacherTimezone: row.timezone,
+        schoolName: input.schoolName,
+      }),
+    ],
+  );
+}
+
 export type ResolveDisputeResult =
   | { status: "rejected" }
   | { status: "resolved_refund"; refundTxnId: string; releaseTxnId: string };
@@ -148,10 +185,11 @@ export async function resolveDispute(
     // ---- refund ----
     const sessionRes = await db.query<{
       slot_id: string;
+      teacher_id: string;
       status: string;
       settle_txn_id: string | null;
     }>(
-      "SELECT slot_id, status, settle_txn_id FROM class_session WHERE id = $1 FOR UPDATE",
+      "SELECT slot_id, teacher_id, status, settle_txn_id FROM class_session WHERE id = $1 FOR UPDATE",
       [dispute.session_id],
     );
     const session = sessionRes.rows[0];
@@ -161,8 +199,13 @@ export async function resolveDispute(
     }
 
     // Slot FOR UPDATE: aynı slotun parasına dokunan diğer akışlarla serileşir.
-    const slotRes = await db.query<{ id: string; school_id: string; price_cents: string }>(
-      "SELECT id, school_id, price_cents FROM booking_slot WHERE id = $1 FOR UPDATE",
+    const slotRes = await db.query<{
+      id: string;
+      school_id: string;
+      price_cents: string;
+      starts_at: Date;
+    }>(
+      "SELECT id, school_id, price_cents, starts_at FROM booking_slot WHERE id = $1 FOR UPDATE",
       [session.slot_id],
     );
     const slot = slotRes.rows[0];
@@ -232,6 +275,30 @@ export async function resolveDispute(
       outcome: "refunded",
       refundedCents: price,
     });
+
+    // P1-A: eğitmenden geri alınan tutar = settle'ın teacher_payable bacağı (ters kayıt
+    // bu bacağı aynen negatifledi). Bacak yoksa (teacher_pay=0) eğitmenden para alınmadı
+    // — bildirim de düşmez.
+    const clawbackRes = await db.query<{ amount_cents: string }>(
+      `SELECT e.amount_cents
+         FROM ledger_entry e
+         JOIN ledger_account a ON a.id = e.account_id
+        WHERE e.txn_id = $1 AND a.owner_type = 'teacher' AND a.kind = 'teacher_payable'`,
+      [session.settle_txn_id],
+    );
+    const clawbackCents = Number(clawbackRes.rows[0]?.amount_cents ?? 0);
+    if (clawbackCents > 0) {
+      const schoolRes = await db.query<{ name: string }>(
+        "SELECT name FROM school WHERE id = $1",
+        [slot.school_id],
+      );
+      await enqueueTeacherAdjustedNotification(db, {
+        teacherId: session.teacher_id,
+        amountCents: clawbackCents,
+        lessonStartsAt: slot.starts_at,
+        schoolName: schoolRes.rows[0]?.name ?? "",
+      });
+    }
 
     return { status: "resolved_refund", refundTxnId, releaseTxnId };
   });

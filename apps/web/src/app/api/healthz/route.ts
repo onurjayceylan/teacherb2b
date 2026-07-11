@@ -24,16 +24,33 @@ interface WorkerFreshness {
   stale: boolean;
 }
 
+/** P0-C: e-posta teslim hattı görünürlüğü — "dispatcher yeşil ama hiç mail çıkmıyor"
+ * durumu artık gövdede ayrı alan olarak raporlanır. */
+interface EmailPipelineHealth {
+  /** RESEND_API_KEY tanımlı mı (gönderici var mı) */
+  configured: boolean;
+  /** outbox'ta bekleyen (pending) kayıt sayısı */
+  pending: number;
+  /** en eski pending kaydın yaşı (dakika); pending yoksa null */
+  oldestPendingMinutes: number | null;
+  /** false: (anahtar yok VE bekleyen var) YA DA (anahtar var VE en eski pending > 60 dk) */
+  ok: boolean;
+}
+
 export async function GET(): Promise<Response> {
   try {
-    const { paymentsFrozen, heartbeats } = await getPool().withPlatform(async (db) => {
+    const { paymentsFrozen, heartbeats, outbox } = await getPool().withPlatform(async (db) => {
       await db.query("SELECT 1");
       const frozen = await isPaymentsFrozen(db);
       const hb = await db.query<{ job: string; last_run_at: Date }>(
         "SELECT job, last_run_at FROM worker_heartbeat WHERE job = ANY($1::text[])",
         [Object.keys(WORKER_STALE_AFTER_MS)],
       );
-      return { paymentsFrozen: frozen, heartbeats: hb.rows };
+      const ob = await db.query<{ pending: string; oldest_created_at: Date | null }>(
+        `SELECT count(*) AS pending, min(created_at) AS oldest_created_at
+           FROM notification_outbox WHERE status = 'pending'`,
+      );
+      return { paymentsFrozen: frozen, heartbeats: hb.rows, outbox: ob.rows[0] ?? null };
     });
 
     const now = Date.now();
@@ -51,12 +68,33 @@ export async function GET(): Promise<Response> {
       if (stale) workersOk = false;
     }
 
+    // P0-C: e-posta hattı durumu. configured=false + pending>0 = anahtar takılmadan
+    // bildirimler birikiyor (kurucu link kuryesi); configured=true + oldest>60 dk =
+    // gönderici var ama hat tıkalı (dispatcher hata dönüyor / koşmuyor olabilir).
+    const emailConfigured = Boolean(process.env.RESEND_API_KEY);
+    const pendingCount = Number(outbox?.pending ?? 0);
+    const oldestPendingMinutes =
+      pendingCount > 0 && outbox?.oldest_created_at
+        ? Math.floor((now - outbox.oldest_created_at.getTime()) / 60_000)
+        : null;
+    const emailPipeline: EmailPipelineHealth = {
+      configured: emailConfigured,
+      pending: pendingCount,
+      oldestPendingMinutes,
+      ok: !(
+        (!emailConfigured && pendingCount > 0) ||
+        (emailConfigured && (oldestPendingMinutes ?? 0) > 60)
+      ),
+    };
+
     return Response.json({
-      ok: !paymentsFrozen && workersOk, // db zaten up (aksi catch'e düşer)
+      // db zaten up (aksi catch'e düşer); emailPipeline.ok üst-düzey ok'a DA girer
+      ok: !paymentsFrozen && workersOk && emailPipeline.ok,
       db: "up",
       paymentsFrozen,
       workers,
       workersOk,
+      emailPipeline,
     });
   } catch {
     return Response.json({ ok: false, db: "down" }, { status: 503 });

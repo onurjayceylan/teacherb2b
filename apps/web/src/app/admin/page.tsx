@@ -141,13 +141,64 @@ interface WorkerHealth {
   stale: boolean;
 }
 
+interface EmailPipeline {
+  configured: boolean;
+  pending: number;
+  oldestPendingMinutes: number | null;
+}
+
 interface HealthStrip {
   todayLessonCount: number;
   liveLessonCount: number;
   oldestPendingTopupDays: number | null;
   failedPayoutCount: number;
   pendingNotificationCount: number;
+  emailPipeline: EmailPipeline;
   workers: WorkerHealth[];
+}
+
+// Reddedilen settle'ın para çözümü kuyruğu satırı (denetim tur-2 P1-B).
+interface RejectedSession {
+  sessionId: string;
+  schoolName: string;
+  className: string;
+  teacherName: string;
+  lessonStartsAt: Date;
+  lessonEndsAt: Date;
+  priceCents: number;
+  rejectedAt: Date;
+  reason: string | null;
+}
+
+/** E-posta hattı karosu (P0-C): kapalı/tıkalı/sağlıklı üç durumdan birini üretir. */
+function emailPipelineTile(p: EmailPipeline): {
+  label: string;
+  value: string;
+  alert: boolean;
+  sub?: string;
+} {
+  if (!p.configured && p.pending > 0) {
+    return {
+      label: "E-posta hattı",
+      value: `KAPALI — ${p.pending} bildirim bekliyor`,
+      alert: true,
+      sub: "Resend anahtarı girilmedi",
+    };
+  }
+  if (p.configured && (p.oldestPendingMinutes ?? 0) > 60) {
+    return {
+      label: "E-posta hattı",
+      value: "TIKALI",
+      alert: true,
+      sub: `en eski bekleyen ${Math.round(p.oldestPendingMinutes ?? 0)} dk — dispatcher loglarına bakın`,
+    };
+  }
+  return {
+    label: "E-posta hattı",
+    value: `OK / ${p.pending} bekliyor`,
+    alert: false,
+    ...(p.configured ? {} : { sub: "Resend anahtarı girilmedi" }),
+  };
 }
 
 /** "3 sa önce" tarzı kısa görece zaman (sağlık şeridi worker rozeti). */
@@ -180,6 +231,7 @@ export default function AdminPage() {
   const [openOffers, setOpenOffers] = useState<OpenOffer[]>([]);
   const [offerLinks, setOfferLinks] = useState<Record<string, OfferLink>>({});
   const [settleReviews, setSettleReviews] = useState<SettleReview[]>([]);
+  const [rejectedSessions, setRejectedSessions] = useState<RejectedSession[]>([]);
   const [health, setHealth] = useState<HealthStrip | null>(null);
   const [schoolsG0, setSchoolsG0] = useState<SchoolG0[]>([]);
 
@@ -199,6 +251,7 @@ export default function AdminPage() {
         pendingNotifRes,
         openOffersRes,
         settleReviewsRes,
+        rejectedSessionsRes,
         healthRes,
         schoolsG0Res,
       ] = await Promise.all([
@@ -213,6 +266,7 @@ export default function AdminPage() {
         trpc.admin.pendingNotificationCount.query(),
         trpc.admin.listOpenOffers.query(),
         trpc.admin.listSettleReviews.query(),
+        trpc.admin.listRejectedSessions.query(),
         trpc.admin.healthStrip.query(),
         trpc.admin.listSchools.query(),
       ]);
@@ -227,6 +281,7 @@ export default function AdminPage() {
       setPendingNotifications(pendingNotifRes.pending);
       setOpenOffers(openOffersRes);
       setSettleReviews(settleReviewsRes);
+      setRejectedSessions(rejectedSessionsRes);
       setHealth(healthRes);
       setSchoolsG0(schoolsG0Res);
     } catch (err) {
@@ -240,13 +295,14 @@ export default function AdminPage() {
     void load();
   }, [load]);
 
+  // Aksiyon string dönerse o dinamik mesaj gösterilir (örn. iade tutarı); yoksa successMsg.
   async function run(action: () => Promise<unknown>, successMsg: string) {
     setBusy(true);
     setActionError(null);
     setNotice(null);
     try {
-      await action();
-      setNotice(successMsg);
+      const result = await action();
+      setNotice(typeof result === "string" ? result : successMsg);
       await load();
     } catch (err) {
       setActionError(errorMessage(err));
@@ -314,10 +370,18 @@ export default function AdminPage() {
                 value: String(health.pendingNotificationCount),
                 alert: health.pendingNotificationCount > 20,
               },
-            ].map((tile) => (
+              emailPipelineTile(health.emailPipeline),
+            ].map((tile: { label: string; value: string; alert: boolean; sub?: string }) => (
               <div key={tile.label} className={tile.alert ? "stat alert" : "stat"}>
                 <div className="k">{tile.label}</div>
-                <div className="v">{tile.value}</div>
+                <div className="v" style={tile.value.length > 8 ? { fontSize: "1rem" } : undefined}>
+                  {tile.value}
+                </div>
+                {tile.sub ? (
+                  <div className="k" style={{ marginTop: "0.2rem" }}>
+                    {tile.sub}
+                  </div>
+                ) : null}
               </div>
             ))}
           </div>
@@ -499,8 +563,8 @@ export default function AdminPage() {
         <p className="muted">
           Kısa/erken biten dersler otomatik settle edilmez; karar burada verilir. Onay parayı
           işler (hold bölüşülür). Ret PARA İŞLEMEZ: oturum &quot;ended&quot;, slot
-          &quot;scheduled&quot; kalır — slot hold-aging uyarısına düşer ve nihai karar (iptal /
-          iade / manuel düzeltme) o kuyrukta verilir.
+          &quot;scheduled&quot; kalır ve ders aşağıdaki &quot;Reddedilen dersler — para çözümü
+          bekliyor&quot; kuyruğuna düşer; nihai karar (okula tam iade) orada verilir.
         </p>
         {settleReviews.length === 0 ? (
           <div className="empty">Onay bekleyen ders yok.</div>
@@ -553,20 +617,85 @@ export default function AdminPage() {
                           disabled={busy}
                           onClick={() => {
                             const note = window.prompt(
-                              "Ret notu (para işlenmez; slot scheduled kaldığı için hold-aging uyarısına düşer — nihai karar orada):",
-                              "ders süresi doğrulanamadı — hold-aging kuyruğunda karar verilecek",
+                              "Ret notu (para işlenmez; ders aşağıdaki 'Reddedilen dersler' çözüm kuyruğuna düşer — nihai karar orada):",
+                              "ders süresi doğrulanamadı — para çözümü ret kuyruğunda",
                             );
                             if (!note) return;
                             void run(
                               () =>
                                 trpc.admin.rejectSettle.mutate({ sessionId: r.sessionId, note }),
-                              "Settle reddedildi — para işlenmedi; slot hold-aging uyarısına düşecek",
+                              "Settle reddedildi — para işlenmedi; ders aşağıdaki ret çözüm kuyruğuna düştü",
                             );
                           }}
                         >
                           Reddet
                         </button>
                       </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Reddedilen dersler — para çözümü bekliyor</h2>
+        <p className="muted">
+          Settle&apos;ı reddedilmiş, parası hâlâ rezervde (hold) bekleyen dersler. &quot;Okula tam
+          iade et&quot; dersi ücretlendirmeden kapatır: hold okula tam iade edilir, slot
+          kapanır (voided_review) ve eğitmene bilgilendirme e-postası gider.
+        </p>
+        {rejectedSessions.length === 0 ? (
+          <div className="empty">Çözüm bekleyen ret yok.</div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Okul / sınıf</th>
+                  <th>Eğitmen</th>
+                  <th>Ders zamanı</th>
+                  <th>Rezervdeki tutar</th>
+                  <th>Ret tarihi</th>
+                  <th>Gerekçe</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rejectedSessions.map((r) => (
+                  <tr key={r.sessionId}>
+                    <td>
+                      {r.schoolName} — {r.className}
+                    </td>
+                    <td>{r.teacherName}</td>
+                    <td>{new Date(r.lessonStartsAt).toLocaleString("tr-TR")}</td>
+                    <td>{formatCents(r.priceCents)}</td>
+                    <td>{new Date(r.rejectedAt).toLocaleString("tr-TR")}</td>
+                    <td style={{ maxWidth: "14rem" }} className="muted">
+                      {r.reason ?? "—"}
+                    </td>
+                    <td>
+                      <button
+                        className="danger"
+                        style={{ marginTop: 0 }}
+                        disabled={busy}
+                        onClick={() => {
+                          const confirmed = window.confirm(
+                            "Ders ücretlendirilmez; rezervdeki tutar okula tam iade edilir. Eğitmene bilgilendirme e-postası gider.",
+                          );
+                          if (!confirmed) return;
+                          void run(async () => {
+                            const res = await trpc.admin.voidRejectedSessionProc.mutate({
+                              sessionId: r.sessionId,
+                            });
+                            return `Ders kapatıldı — ${formatCents(res.refundCents)} okula tam iade edildi; eğitmene bilgilendirme e-postası kuyruğa alındı.`;
+                          }, "Ders kapatıldı — rezerv okula tam iade edildi");
+                        }}
+                      >
+                        Okula tam iade et
+                      </button>
                     </td>
                   </tr>
                 ))}

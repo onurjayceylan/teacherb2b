@@ -71,7 +71,14 @@ test("backfill-sweeper job'ı: SLA penceresindeki atanmamış slot escalate edil
     return res.rows[0]!.id;
   });
 
-  expect(await runBackfillSweep(tdb.pool)).toEqual({ offered: 0, reoffered: 0, escalated: 1 });
+  // P0-B: sweep artık bloke-slot retry sonucunu da döndürür (bu senaryoda bloke slot yok).
+  expect(await runBackfillSweep(tdb.pool)).toEqual({
+    offered: 0,
+    reoffered: 0,
+    escalated: 1,
+    retried: 0,
+    stillBlocked: 0,
+  });
 
   await tdb.pool.withPlatform(async (db) => {
     const slot = await db.query<{ status: string }>(
@@ -87,7 +94,13 @@ test("backfill-sweeper job'ı: SLA penceresindeki atanmamış slot escalate edil
   });
 
   // İkinci koşu: escalated slot artık süpürülmez
-  expect(await runBackfillSweep(tdb.pool)).toEqual({ offered: 0, reoffered: 0, escalated: 0 });
+  expect(await runBackfillSweep(tdb.pool)).toEqual({
+    offered: 0,
+    reoffered: 0,
+    escalated: 0,
+    retried: 0,
+    stillBlocked: 0,
+  });
 });
 
 test("payout-reconciler job'ı: 1 saatten uzun 'submitted' payout warning'lenir (24s tekrar korumalı)", async () => {
