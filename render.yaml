@@ -1,0 +1,54 @@
+# Render blueprint (01-mimari kararı: 1 web + 1 worker aynı imaj + managed Postgres 16).
+# Kurulum adımları: docs/deploy.md
+databases:
+  - name: teachernow-db
+    postgresMajorVersion: "16"
+    plan: basic-1gb
+
+services:
+  - type: web
+    name: teachernow-web
+    runtime: docker
+    plan: starter
+    healthCheckPath: /api/healthz
+    # Migration release-phase'de, app rollout'undan ÖNCE koşar (migration disiplini):
+    preDeployCommand: pnpm db:migrate
+    envVars:
+      - key: MODE
+        value: web
+      - key: DATABASE_URL
+        fromDatabase:
+          name: teachernow-db
+          property: connectionString
+      - key: DATABASE_ADMIN_URL
+        sync: false # testler dışında gerekmez; prod'da BOŞ bırakılabilir
+      - key: BETTER_AUTH_SECRET
+        generateValue: true
+      - key: BETTER_AUTH_URL
+        sync: false # https://<web-servis-adresin> — deploy sonrası gir
+      - key: NEXT_PUBLIC_BASE_URL
+        sync: false # BETTER_AUTH_URL ile aynı değer
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+
+  - type: worker
+    name: teachernow-worker
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: MODE
+        value: worker
+      - key: DATABASE_URL
+        fromDatabase:
+          name: teachernow-db
+          property: connectionString

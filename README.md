@@ -18,6 +18,15 @@ Düşük-maliyet + AI-destekli eğitmen havuzlarını özel okullara toptan sata
 
 ## Durum
 
-- ✅ Mimari, veri modeli ve MVP kapsamı **karar** statüsünde; 8 kurucu kararı işlendi.
-- ⏳ Bekleyen veri girdileri (kodu bloklamaz): eğitmen kayıt kaynağı + sayılar, ülke dağılımı, pilot okul listesi, tüzel kişilik + minimum top-up.
-- ⬜ Sıradaki iş: S1 iskeleti — pnpm monorepo + CI kapıları (migration smoke, cross-tenant süiti, dependency-cruiser, pii-linter) + better-auth/tenancy/RLS + ledger çekirdeği + Stripe Checkout. Gün-1 kod-dışı iş: vendor başvuruları (Stripe Connect, Wise, Persona, DocuSign).
+- ✅ **Faz-1 mühendislik kapsamı (S1–S6) TAMAM** — 102 test / 10 paket, CI 6/6 yeşil.
+  Çekirdek: çift-kayıt ledger + kill-switch + invariant nöbetçileri · self-serve okul
+  kaydı + kart/havale cüzdan · HR hattı (login'siz eğitmen onboarding'i + 5-evrak payout
+  hard-gate + İK görüşmesi) · dispatch (hold'lu reçete→slot→teklif + iptal/no-show matrisi
+  + backfill SLA iadesi) · ders→yoklama→otomatik settle→itiraz/iade · payout (Wise-manuel
+  + sonuç-dosyası mutabakatı) · ekstre + eğitmen paneli · /baslangic sihirbazı + funnel ·
+  /admin/metrikler · sentetik prob.
+- 🚀 **Deploy:** [docs/deploy.md](docs/deploy.md) (Render blueprint: `render.yaml`) ·
+  **Pilot açılışı:** [docs/pilot-runbook.md](docs/pilot-runbook.md) (MEV · Era · Dream Big)
+- ⏳ Vendor anahtarları bekleniyor (kod hazır): Stripe, Google/Microsoft OAuth, Checkly,
+  Resend, Sentry, Persona/DocuSign webhook'ları, hrmasterz API (CSV çalışıyor).
+- 🧭 Geliştirme: [docs/dev-setup.md](docs/dev-setup.md)
