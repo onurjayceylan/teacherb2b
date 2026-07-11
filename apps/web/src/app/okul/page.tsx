@@ -226,10 +226,26 @@ export default function OkulPage() {
         {runway && runway.weeks !== null ? (
           // Runway: önümüzdeki 28 günün taahhüdü (tutarları zaten rezervde) + serbest bakiye,
           // haftalık ortalamaya bölünür. Haftalık taahhüt yoksa gösterge gizli.
-          <p className="muted">
-            Bakiye + mevcut rezervlerle yaklaşık <strong>{runway.weeks} hafta</strong> taahhüt
-            karşılanıyor (önümüzdeki 28 günde {formatCents(runway.committedCents)} planlı ders).
-          </p>
+          <>
+            <div className="stat-grid" style={{ marginTop: "0.9rem" }}>
+              <div className={`stat${runway.weeks < 2 ? " alert" : ""}`}>
+                <div className="k">Tahmini runway</div>
+                <div className="v">{runway.weeks} hafta</div>
+              </div>
+              <div className="stat">
+                <div className="k">28 günlük rezerv</div>
+                <div className="v">{formatCents(runway.committedCents)}</div>
+              </div>
+              <div className="stat">
+                <div className="k">Haftalık ortalama</div>
+                <div className="v">{formatCents(runway.weeklyAvgCents)}</div>
+              </div>
+            </div>
+            <p className="muted" style={{ marginTop: "0.6rem" }}>
+              Bakiye + mevcut rezervlerle yaklaşık <strong>{runway.weeks} hafta</strong> taahhüt
+              karşılanıyor (önümüzdeki 28 günde {formatCents(runway.committedCents)} planlı ders).
+            </p>
+          </>
         ) : null}
       </div>
 
@@ -308,28 +324,30 @@ export default function OkulPage() {
               <div key={a.id} style={{ marginTop: "0.75rem" }}>
                 <strong>{a.label}</strong>{" "}
                 <span className="muted">({a.rail === "eft_tr" ? "EFT / TL" : "SWIFT / USD"})</span>
-                <table>
-                  <tbody>
-                    <tr>
-                      <th>Alıcı</th>
-                      <td>{a.holder}</td>
-                    </tr>
-                    <tr>
-                      <th>IBAN</th>
-                      <td className="mono">{a.iban}</td>
-                    </tr>
-                    <tr>
-                      <th>Banka</th>
-                      <td>{a.bankName}</td>
-                    </tr>
-                    {a.swiftBic ? (
+                <div className="table-wrap" style={{ marginTop: "0.4rem" }}>
+                  <table>
+                    <tbody>
                       <tr>
-                        <th>SWIFT/BIC</th>
-                        <td className="mono">{a.swiftBic}</td>
+                        <th>Alıcı</th>
+                        <td>{a.holder}</td>
                       </tr>
-                    ) : null}
-                  </tbody>
-                </table>
+                      <tr>
+                        <th>IBAN</th>
+                        <td className="mono">{a.iban}</td>
+                      </tr>
+                      <tr>
+                        <th>Banka</th>
+                        <td>{a.bankName}</td>
+                      </tr>
+                      {a.swiftBic ? (
+                        <tr>
+                          <th>SWIFT/BIC</th>
+                          <td className="mono">{a.swiftBic}</td>
+                        </tr>
+                      ) : null}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             ))}
             {bankAccounts.length === 0 ? (
@@ -348,9 +366,9 @@ export default function OkulPage() {
       <div className="card">
         <h2>Bekleyen havaleleriniz</h2>
         {pendingTopups.length === 0 ? (
-          <p className="muted">Bekleyen havale talebi yok.</p>
+          <div className="empty">Bekleyen havale talebi yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>

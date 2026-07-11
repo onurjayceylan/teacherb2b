@@ -336,9 +336,9 @@ export default function OdemelerPage() {
       <div className="card">
         <h2>Batch listesi</h2>
         {batches.length === 0 ? (
-          <p className="muted">Henüz batch yok.</p>
+          <div className="empty">Henüz batch yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -402,7 +402,7 @@ export default function OdemelerPage() {
                 rows={Math.min(10, csv.split("\n").length + 1)}
                 style={{ width: "100%", fontFamily: "monospace", fontSize: "0.8rem" }}
               />
-              <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+              <div className="actions" style={{ marginTop: "0.6rem" }}>
                 <button
                   className="secondary"
                   disabled={busy}
@@ -502,9 +502,9 @@ export default function OdemelerPage() {
       <div className="card">
         <h2>Payout&apos;lar</h2>
         {recent.length === 0 ? (
-          <p className="muted">Henüz payout yok.</p>
+          <div className="empty">Henüz payout yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -548,9 +548,9 @@ export default function OdemelerPage() {
           iade/reversal yollarıyla yapılır. Açık itirazlar üstte.
         </p>
         {chargebacks.length === 0 ? (
-          <p className="muted">Kart itirazı yok.</p>
+          <div className="empty">Kart itirazı yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -588,7 +588,7 @@ export default function OdemelerPage() {
           Ledger&apos;daki clearing hesabına göre sağlayıcıda olması beklenen para ile son bildirilen
           gerçek bakiye karşılaştırılır; fark varsa satır kırmızı uyarı verir.
         </p>
-        <div style={{ overflowX: "auto" }}>
+        <div className="table-wrap">
           <table>
             <thead>
               <tr>
@@ -686,9 +686,9 @@ export default function OdemelerPage() {
 
         <h3 style={{ marginTop: "1rem" }}>Son bakiye bildirimleri</h3>
         {snapshots.length === 0 ? (
-          <p className="muted">Henüz bakiye bildirimi yok.</p>
+          <div className="empty">Henüz bakiye bildirimi yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>

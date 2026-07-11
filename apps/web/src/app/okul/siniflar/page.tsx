@@ -227,7 +227,7 @@ export default function SiniflarPage() {
       <div className="card">
         <h2>Sınıf listesi</h2>
         {classes.length === 0 ? (
-          <p className="muted">Henüz sınıf yok.</p>
+          <div className="empty">Henüz sınıf yok.</div>
         ) : (
           classes.map((c) => {
             const report = reports[c.classGroupId];
@@ -253,11 +253,11 @@ export default function SiniflarPage() {
                 {report ? (
                   <div style={{ marginTop: "0.5rem" }}>
                     {report.markedLessons === 0 ? (
-                      <p className="muted">
+                      <div className="empty">
                         Bu sınıfta yoklaması işaretlenmiş tamamlanmış ders yok.
-                      </p>
+                      </div>
                     ) : (
-                      <div style={{ overflowX: "auto" }}>
+                      <div className="table-wrap">
                         <table>
                           <thead>
                             <tr>

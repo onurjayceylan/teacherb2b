@@ -1,10 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "./globals.css";
+import { LangScope } from "./lang-scope";
+import { TopNav } from "./top-nav";
 
 export const metadata: Metadata = {
-  title: "Teachernow",
-  description: "Okullar için öğretmen pazaryeri — S1 kabuğu",
+  title: { default: "Teachernow", template: "%s — Teachernow" },
+  description: "Okullar için eğitmen operasyon platformu — speaking club dersleri, tek panelden.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#f4f5f9",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -12,15 +20,8 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="tr">
       <body>
         <div className="shell">
-          <nav className="topbar">
-            <a className="brand" href="/">
-              Teachernow
-            </a>
-            <a href="/okul">Okul</a>
-            <a href="/baslangic">Başlangıç</a>
-            <a href="/admin">Admin</a>
-          </nav>
-          {children}
+          <TopNav />
+          <LangScope>{children}</LangScope>
         </div>
       </body>
     </html>

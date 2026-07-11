@@ -147,8 +147,9 @@ export default function MetriklerPage() {
 
       <div className="card">
         <h2>Aktivasyon</h2>
-        <table>
-          <tbody>
+        <div className="table-wrap">
+          <table>
+            <tbody>
             <tr>
               <th>Okul sayısı</th>
               <td>
@@ -185,82 +186,93 @@ export default function MetriklerPage() {
                 <span className="muted">hedef ≤ 14 gün</span>
               </td>
             </tr>
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-        <h2 style={{ marginTop: "1rem" }}>Sihirbaz funnel'ı</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Adım</th>
-              <th>Okul</th>
-              <th>Olay</th>
-            </tr>
-          </thead>
-          <tbody>
-            {FUNNEL_ORDER.map((action) => {
-              const row = funnelByAction.get(action);
-              return (
-                <tr key={action}>
-                  <td>{FUNNEL_LABELS[action] ?? action}</td>
-                  <td>{row?.schools ?? 0}</td>
-                  <td>{row?.events ?? 0}</td>
-                </tr>
-              );
-            })}
-            {extraFunnel.map((f) => (
-              <tr key={f.action}>
-                <td className="mono">{f.action}</td>
-                <td>{f.schools}</td>
-                <td>{f.events}</td>
+      <div className="card">
+        <h2>Sihirbaz funnel'ı</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Adım</th>
+                <th>Okul</th>
+                <th>Olay</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {FUNNEL_ORDER.map((action) => {
+                const row = funnelByAction.get(action);
+                return (
+                  <tr key={action}>
+                    <td>{FUNNEL_LABELS[action] ?? action}</td>
+                    <td>{row?.schools ?? 0}</td>
+                    <td>{row?.events ?? 0}</td>
+                  </tr>
+                );
+              })}
+              {extraFunnel.map((f) => (
+                <tr key={f.action}>
+                  <td className="mono">{f.action}</td>
+                  <td>{f.schools}</td>
+                  <td>{f.events}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
 
-        <h2 style={{ marginTop: "1rem" }}>Funnel adım geçiş süreleri (medyan)</h2>
+      <div className="card">
+        <h2>Funnel adım geçiş süreleri (medyan)</h2>
         <p className="muted">
           Okul başına adımın İLK olayı esas alınır; medyan yalnız iki adımı da yaşamış okullar
           üzerinden hesaplanır.
         </p>
-        <table>
-          <thead>
-            <tr>
-              <th>Geçiş</th>
-              <th>Medyan süre</th>
-              <th>Okul</th>
-            </tr>
-          </thead>
-          <tbody>
-            {activation.funnelDurations.map((d) => (
-              <tr key={`${d.fromAction}->${d.toAction}`}>
-                <td>
-                  {(FUNNEL_LABELS[d.fromAction] ?? d.fromAction).replace(/^\d+\. /, "")} →{" "}
-                  {(FUNNEL_LABELS[d.toAction] ?? d.toAction).replace(/^\d+\. /, "")}
-                </td>
-                <td>{hours(d.medianHours)}</td>
-                <td>{d.schoolCount}</td>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Geçiş</th>
+                <th>Medyan süre</th>
+                <th>Okul</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {activation.funnelDurations.map((d) => (
+                <tr key={`${d.fromAction}->${d.toAction}`}>
+                  <td>
+                    {(FUNNEL_LABELS[d.fromAction] ?? d.fromAction).replace(/^\d+\. /, "")} →{" "}
+                    {(FUNNEL_LABELS[d.toAction] ?? d.toAction).replace(/^\d+\. /, "")}
+                  </td>
+                  <td>{hours(d.medianHours)}</td>
+                  <td>{d.schoolCount}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card">
         <h2>Dosaj — slot kırılımı (son {dosage.windowDays} gün + planlı ufuk)</h2>
         {slotStatuses.length === 0 ? (
-          <p className="muted">Pencerede slot yok.</p>
+          <div className="empty">Pencerede slot yok.</div>
         ) : (
-          <table>
-            <tbody>
-              {slotStatuses.map((s) => (
-                <tr key={s}>
-                  <th>{SLOT_LABELS[s]}</th>
-                  <td>{dosage.slotCounts[s]}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-wrap">
+            <table>
+              <tbody>
+                {slotStatuses.map((s) => (
+                  <tr key={s}>
+                    <th>{SLOT_LABELS[s]}</th>
+                    <td>{dosage.slotCounts[s]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <p style={{ marginTop: "0.75rem" }}>
           Gerçekleşme oranı (ders sayısı):{" "}
@@ -287,8 +299,9 @@ export default function MetriklerPage() {
 
       <div className="card">
         <h2>Backfill vaka raporu (sayı — yüzde değil)</h2>
-        <table>
-          <tbody>
+        <div className="table-wrap">
+          <table>
+            <tbody>
             <tr>
               <th>SLA eskalasyonu (sla_escalated)</th>
               <td>
@@ -300,14 +313,16 @@ export default function MetriklerPage() {
               <th>Yeniden teklif (eğitmen düşmesi sonrası)</th>
               <td>{backfill.reofferCount} vaka</td>
             </tr>
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card">
         <h2>Para</h2>
-        <table>
-          <tbody>
+        <div className="table-wrap">
+          <table>
+            <tbody>
             <tr>
               <th>Settled ders</th>
               <td>
@@ -335,30 +350,33 @@ export default function MetriklerPage() {
                 </span>
               </td>
             </tr>
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card">
         <h2>Eğitmen</h2>
-        <table>
-          <tbody>
-            <tr>
-              <th>Aktif eğitmen</th>
-              <td>{teachers.activeCount}</td>
-            </tr>
-            <tr>
-              <th>Payout'a hazır (evrak seti tam)</th>
-              <td>{teachers.payoutReadyCount}</td>
-            </tr>
-            <tr>
-              <th>Açık payout</th>
-              <td>
-                {teachers.openPayoutCount} kayıt · {formatCents(teachers.openPayoutTotalCents)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <tbody>
+              <tr>
+                <th>Aktif eğitmen</th>
+                <td>{teachers.activeCount}</td>
+              </tr>
+              <tr>
+                <th>Payout'a hazır (evrak seti tam)</th>
+                <td>{teachers.payoutReadyCount}</td>
+              </tr>
+              <tr>
+                <th>Açık payout</th>
+                <td>
+                  {teachers.openPayoutCount} kayıt · {formatCents(teachers.openPayoutTotalCents)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </main>
   );

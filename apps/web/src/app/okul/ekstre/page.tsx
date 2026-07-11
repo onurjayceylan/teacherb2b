@@ -117,6 +117,7 @@ export default function EkstrePage() {
       </p>
 
       <div className="card">
+        <h2>Dönem</h2>
         <div className="row">
           <div>
             <label htmlFor="ek-month">Ay</label>
@@ -146,8 +147,9 @@ export default function EkstrePage() {
             <h2>
               Dönem toplamları — {statement.from} → {statement.to}
             </h2>
-            <table>
-              <tbody>
+            <div className="table-wrap">
+              <table>
+                <tbody>
                 <tr>
                   <th>Dönem başı bakiye</th>
                   <td>{formatCents(statement.openingBalanceCents)}</td>
@@ -173,8 +175,9 @@ export default function EkstrePage() {
                     <strong>{formatCents(statement.closingBalanceCents)}</strong>
                   </td>
                 </tr>
-              </tbody>
-            </table>
+                </tbody>
+              </table>
+            </div>
             <p className="muted">
               Rezerv: planlanan derslerin ücretleri ders yapılana (ya da iptal edilene) kadar
               bakiyenizden ayrılır; akan bakiye yalnız nakit hesabınızı izler.
@@ -184,16 +187,16 @@ export default function EkstrePage() {
           <div className="card">
             <h2>Hareketler</h2>
             {statement.rows.length > 0 ? (
-              <p>
+              <div className="actions" style={{ marginBottom: "0.8rem" }}>
                 <button className="secondary" onClick={() => downloadCsv(statement, month)}>
                   CSV indir ({statement.rows.length} satır)
                 </button>
-              </p>
+              </div>
             ) : null}
             {statement.rows.length === 0 ? (
-              <p className="muted">Bu dönemde hareket yok.</p>
+              <div className="empty">Bu dönemde hareket yok.</div>
             ) : (
-              <div style={{ overflowX: "auto" }}>
+              <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>

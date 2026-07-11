@@ -292,48 +292,36 @@ export default function AdminPage() {
       {health ? (
         <div className="card">
           <h2>Sağlık şeridi</h2>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem" }}>
+          <div className="stat-grid">
             {[
-              { label: "Bugünkü ders", value: String(health.todayLessonCount), warn: false },
-              { label: "Şu an canlı ders", value: String(health.liveLessonCount), warn: false },
+              { label: "Bugünkü ders", value: String(health.todayLessonCount), alert: false },
+              { label: "Canlı ders", value: String(health.liveLessonCount), alert: false },
               {
                 label: "En eski bekleyen havale",
                 value:
                   health.oldestPendingTopupDays === null
                     ? "—"
                     : `${health.oldestPendingTopupDays.toFixed(1)} gün`,
-                warn: (health.oldestPendingTopupDays ?? 0) > 2,
+                alert: (health.oldestPendingTopupDays ?? 0) > 2,
               },
               {
                 label: "Başarısız payout",
                 value: String(health.failedPayoutCount),
-                warn: health.failedPayoutCount > 0,
+                alert: health.failedPayoutCount > 0,
               },
               {
                 label: "Bekleyen bildirim",
                 value: String(health.pendingNotificationCount),
-                warn: health.pendingNotificationCount > 20,
+                alert: health.pendingNotificationCount > 20,
               },
             ].map((tile) => (
-              <div
-                key={tile.label}
-                style={{
-                  border: "1px solid #e2e6ec",
-                  borderRadius: "8px",
-                  padding: "0.5rem 0.9rem",
-                  minWidth: "9rem",
-                }}
-              >
-                <div className="muted" style={{ fontSize: "0.75rem" }}>
-                  {tile.label}
-                </div>
-                <div style={{ fontSize: "1.25rem", fontWeight: 600 }}>
-                  {tile.warn ? <span className="badge warn">{tile.value}</span> : tile.value}
-                </div>
+              <div key={tile.label} className={tile.alert ? "stat alert" : "stat"}>
+                <div className="k">{tile.label}</div>
+                <div className="v">{tile.value}</div>
               </div>
             ))}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.75rem" }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem", marginTop: "0.9rem" }}>
             {health.workers.map((w) => (
               <span key={w.job} className={`badge ${w.stale ? "warn" : "ok"}`}>
                 {w.job}: {w.lastRunAt ? timeAgo(w.lastRunAt) : "hiç koşmadı"}
@@ -355,9 +343,9 @@ export default function AdminPage() {
           okulu (örn. kurumsal dil sınıfı) buradan kapatın.
         </p>
         {schoolsG0.length === 0 ? (
-          <p className="muted">Kayıtlı okul yok.</p>
+          <div className="empty">Kayıtlı okul yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -414,9 +402,9 @@ export default function AdminPage() {
           URL&apos;yi gösterir.
         </p>
         {openOffers.length === 0 ? (
-          <p className="muted">Bekleyen teklif yok.</p>
+          <div className="empty">Bekleyen teklif yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -451,6 +439,7 @@ export default function AdminPage() {
                     </td>
                     <td>
                       <button
+                        style={{ marginTop: 0 }}
                         disabled={busy}
                         onClick={() =>
                           void run(async () => {
@@ -514,9 +503,9 @@ export default function AdminPage() {
           iade / manuel düzeltme) o kuyrukta verilir.
         </p>
         {settleReviews.length === 0 ? (
-          <p className="muted">Onay bekleyen ders yok.</p>
+          <div className="empty">Onay bekleyen ders yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -547,7 +536,7 @@ export default function AdminPage() {
                       {r.reason ?? "—"}
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: "0.35rem" }}>
+                      <div className="actions">
                         <button
                           disabled={busy}
                           onClick={() =>
@@ -560,8 +549,7 @@ export default function AdminPage() {
                           Onayla
                         </button>
                         <button
-                          className="secondary"
-                          style={{ marginTop: 0 }}
+                          className="danger"
                           disabled={busy}
                           onClick={() => {
                             const note = window.prompt(
@@ -728,6 +716,7 @@ export default function AdminPage() {
           )}
         </p>
         <button
+          className={frozen ? undefined : "danger"}
           disabled={busy || frozen === null}
           onClick={() =>
             void run(
@@ -768,30 +757,32 @@ export default function AdminPage() {
           snapshot&apos;ını taşır.
         </p>
         {poolPricing.length === 0 ? (
-          <p className="muted">Tanımlı havuz yok.</p>
+          <div className="empty">Tanımlı havuz yok.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Havuz</th>
-                <th>Satış / ders</th>
-                <th>Eğitmen maliyeti / ders</th>
-                <th>Süre</th>
-              </tr>
-            </thead>
-            <tbody>
-              {poolPricing.map((p) => (
-                <tr key={p.id}>
-                  <td>
-                    {p.name} {p.active ? null : <span className="badge warn">pasif</span>}
-                  </td>
-                  <td>{formatCents(p.sellPerLessonCents)}</td>
-                  <td>{formatCents(p.payPerLessonCents)}</td>
-                  <td>{p.lessonMinutes} dk</td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Havuz</th>
+                  <th>Satış / ders</th>
+                  <th>Eğitmen maliyeti / ders</th>
+                  <th>Süre</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {poolPricing.map((p) => (
+                  <tr key={p.id}>
+                    <td>
+                      {p.name} {p.active ? null : <span className="badge warn">pasif</span>}
+                    </td>
+                    <td>{formatCents(p.sellPerLessonCents)}</td>
+                    <td>{formatCents(p.payPerLessonCents)}</td>
+                    <td>{p.lessonMinutes} dk</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <form
@@ -896,9 +887,9 @@ export default function AdminPage() {
           (tarihçe değişmez).
         </p>
         {disputes.length === 0 ? (
-          <p className="muted">Açık itiraz yok.</p>
+          <div className="empty">Açık itiraz yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -922,8 +913,9 @@ export default function AdminPage() {
                     <td style={{ maxWidth: "16rem" }}>{d.reason}</td>
                     <td>{new Date(d.createdAt).toLocaleString("tr-TR")}</td>
                     <td>
-                      <div style={{ display: "flex", gap: "0.35rem" }}>
+                      <div className="actions">
                         <button
+                          className="danger"
                           disabled={busy}
                           onClick={() => {
                             const note = window.prompt("İade karar notu:", "itiraz haklı — iade");
@@ -943,7 +935,6 @@ export default function AdminPage() {
                         </button>
                         <button
                           className="secondary"
-                          style={{ marginTop: 0 }}
                           disabled={busy}
                           onClick={() => {
                             const note = window.prompt("Ret karar notu:", "kayıtlar dersi doğruluyor");
@@ -983,9 +974,9 @@ export default function AdminPage() {
           </p>
         ) : null}
         {!notifications || notifications.items.length === 0 ? (
-          <p className="muted">Henüz bildirim kaydı yok.</p>
+          <div className="empty">Henüz bildirim kaydı yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -1023,95 +1014,101 @@ export default function AdminPage() {
       <div className="card">
         <h2>Bekleyen havale top-up&apos;ları</h2>
         {pending.length === 0 ? (
-          <p className="muted">Bekleyen havale yok.</p>
+          <div className="empty">Bekleyen havale yok.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Okul</th>
-                <th>Tutar</th>
-                <th>Referans</th>
-                <th>Tarih</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pending.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.schoolName}</td>
-                  <td>{formatCents(t.amountCents, t.currency)}</td>
-                  <td className="mono">{t.referenceCode ?? "—"}</td>
-                  <td>{new Date(t.createdAt).toLocaleString("tr-TR")}</td>
-                  <td>
-                    <button
-                      disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () => trpc.admin.settleBankTopup.mutate({ topupId: t.id }),
-                          "Havale settle edildi — bakiye güncellendi",
-                        )
-                      }
-                    >
-                      Settle
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Okul</th>
+                  <th>Tutar</th>
+                  <th>Referans</th>
+                  <th>Tarih</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {pending.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.schoolName}</td>
+                    <td>{formatCents(t.amountCents, t.currency)}</td>
+                    <td className="mono">{t.referenceCode ?? "—"}</td>
+                    <td>{new Date(t.createdAt).toLocaleString("tr-TR")}</td>
+                    <td>
+                      <button
+                        style={{ marginTop: 0 }}
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () => trpc.admin.settleBankTopup.mutate({ topupId: t.id }),
+                            "Havale settle edildi — bakiye güncellendi",
+                          )
+                        }
+                      >
+                        Settle
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       <div className="card">
         <h2>Banka hesapları</h2>
         {accounts.length === 0 ? (
-          <p className="muted">Tanımlı banka hesabı yok.</p>
+          <div className="empty">Tanımlı banka hesabı yok.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Etiket</th>
-                <th>Ray</th>
-                <th>IBAN</th>
-                <th>Durum</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.label}</td>
-                  <td>{a.rail === "eft_tr" ? "EFT / TL" : "SWIFT / USD"}</td>
-                  <td className="mono">{a.iban}</td>
-                  <td>
-                    {a.active ? (
-                      <span className="badge ok">aktif</span>
-                    ) : (
-                      <span className="badge warn">pasif</span>
-                    )}
-                  </td>
-                  <td>
-                    <button
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(
-                          () =>
-                            trpc.admin.setBankAccountActive.mutate({
-                              id: a.id,
-                              active: !a.active,
-                            }),
-                          a.active ? "Hesap pasifleştirildi" : "Hesap aktifleştirildi",
-                        )
-                      }
-                    >
-                      {a.active ? "Pasifleştir" : "Aktifleştir"}
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Etiket</th>
+                  <th>Ray</th>
+                  <th>IBAN</th>
+                  <th>Durum</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {accounts.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.label}</td>
+                    <td>{a.rail === "eft_tr" ? "EFT / TL" : "SWIFT / USD"}</td>
+                    <td className="mono">{a.iban}</td>
+                    <td>
+                      {a.active ? (
+                        <span className="badge ok">aktif</span>
+                      ) : (
+                        <span className="badge warn">pasif</span>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        className="secondary"
+                        style={{ marginTop: 0 }}
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              trpc.admin.setBankAccountActive.mutate({
+                                id: a.id,
+                                active: !a.active,
+                              }),
+                            a.active ? "Hesap pasifleştirildi" : "Hesap aktifleştirildi",
+                          )
+                        }
+                      >
+                        {a.active ? "Pasifleştir" : "Aktifleştir"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
         <h2 style={{ marginTop: "1.25rem" }}>Yeni banka hesabı</h2>

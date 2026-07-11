@@ -309,18 +309,14 @@ export default function BaslangicPage() {
       <h1>Başlangıç sihirbazı</h1>
       <p className="muted">Hedef: 15 dakikadan kısa sürede ilk ders reçeteniz oluşsun.</p>
 
-      {/* Adım göstergesi */}
+      {/* Adım göstergesi: tamamlanan ✓ yeşil, aktif adım mavi, gelecektekiler soluk */}
       <p aria-label="adımlar">
         {STEPS.map((s, i) => (
           <span key={s.no}>
             {i > 0 ? <span className="muted"> → </span> : null}
             <span
-              className={s.no === step ? "badge ok" : "badge"}
-              style={
-                s.no === step
-                  ? undefined
-                  : { background: "#eef1f5", color: s.no < step ? "var(--ok)" : "var(--muted)" }
-              }
+              className={s.no < step ? "badge ok" : s.no === step ? "badge info" : "badge"}
+              style={s.no > step ? { background: "#eef1f5", color: "var(--muted)" } : undefined}
             >
               {s.no < step ? "✓ " : `${s.no}. `}
               {s.title}
@@ -423,28 +419,30 @@ export default function BaslangicPage() {
                 <div key={a.id} style={{ marginTop: "0.75rem" }}>
                   <strong>{a.label}</strong>{" "}
                   <span className="muted">({a.rail === "eft_tr" ? "EFT / TL" : "SWIFT / USD"})</span>
-                  <table>
-                    <tbody>
-                      <tr>
-                        <th>Alıcı</th>
-                        <td>{a.holder}</td>
-                      </tr>
-                      <tr>
-                        <th>IBAN</th>
-                        <td className="mono">{a.iban}</td>
-                      </tr>
-                      <tr>
-                        <th>Banka</th>
-                        <td>{a.bankName}</td>
-                      </tr>
-                      {a.swiftBic ? (
+                  <div className="table-wrap" style={{ marginTop: "0.4rem" }}>
+                    <table>
+                      <tbody>
                         <tr>
-                          <th>SWIFT/BIC</th>
-                          <td className="mono">{a.swiftBic}</td>
+                          <th>Alıcı</th>
+                          <td>{a.holder}</td>
                         </tr>
-                      ) : null}
-                    </tbody>
-                  </table>
+                        <tr>
+                          <th>IBAN</th>
+                          <td className="mono">{a.iban}</td>
+                        </tr>
+                        <tr>
+                          <th>Banka</th>
+                          <td>{a.bankName}</td>
+                        </tr>
+                        {a.swiftBic ? (
+                          <tr>
+                            <th>SWIFT/BIC</th>
+                            <td className="mono">{a.swiftBic}</td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               ))}
               <p className="muted">
@@ -454,12 +452,12 @@ export default function BaslangicPage() {
             </div>
           ) : null}
 
-          <div style={{ marginTop: "0.5rem" }}>
+          <div className="actions" style={{ marginTop: "0.9rem" }}>
             {bankRef ? (
               <button onClick={() => finishWalletStep()} disabled={busy}>
                 Devam et
               </button>
-            ) : null}{" "}
+            ) : null}
             <button className="secondary" onClick={() => finishWalletStep()} disabled={busy}>
               Bakiyem hazır — bu adımı geç
             </button>
@@ -607,8 +605,9 @@ export default function BaslangicPage() {
           <p>
             <strong>{school?.name ?? "Okulunuz"}</strong> kuruldu ve ilk ders reçeteniz oluştu.
           </p>
-          <table>
-            <tbody>
+          <div className="table-wrap">
+            <table>
+              <tbody>
               <tr>
                 <th>Cüzdan</th>
                 <td>
@@ -636,8 +635,9 @@ export default function BaslangicPage() {
                     : "—"}
                 </td>
               </tr>
-            </tbody>
-          </table>
+              </tbody>
+            </table>
+          </div>
           <p className="muted">
             Eğitmen araması başladı — atamaları ve ders linklerini programda izleyebilirsiniz.
           </p>

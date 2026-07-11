@@ -309,9 +309,9 @@ export default function EgitmenlerPage() {
           </div>
         </div>
         {teachers.length === 0 ? (
-          <p className="muted">Kayıtlı eğitmen yok.</p>
+          <div className="empty">Kayıtlı eğitmen yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -419,7 +419,7 @@ export default function EgitmenlerPage() {
                         )}
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                        <div className="actions">
                           <select
                             aria-label={`${t.fullName} evrak türü`}
                             value={draft.kind}
@@ -475,7 +475,7 @@ export default function EgitmenlerPage() {
                         </div>
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                        <div className="actions">
                           <button
                             className="secondary"
                             style={{ marginTop: 0 }}
@@ -523,7 +523,7 @@ export default function EgitmenlerPage() {
                         ) : null}
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                        <div className="actions">
                           <button
                             className="secondary"
                             style={{ marginTop: 0 }}
@@ -789,7 +789,7 @@ export default function EgitmenlerPage() {
       <div className="card">
         <h2>Görüşme sonuçlandır</h2>
         {interviews.length === 0 ? (
-          <p className="muted">Açık görüşme yok.</p>
+          <div className="empty">Açık görüşme yok.</div>
         ) : (
           <form
             onSubmit={(e) => {
@@ -910,44 +910,46 @@ export default function EgitmenlerPage() {
         {availTeacherId ? (
           <>
             {availability.length === 0 ? (
-              <p className="muted">Bu eğitmenin aktif müsaitlik penceresi yok.</p>
+              <div className="empty">Bu eğitmenin aktif müsaitlik penceresi yok.</div>
             ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Gün</th>
-                    <th>Aralık</th>
-                    <th>Saat dilimi</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {availability.map((w) => (
-                    <tr key={w.id}>
-                      <td>{WEEKDAYS[w.weekday]}</td>
-                      <td className="mono">
-                        {minuteToHHMM(w.startMinute)}–{minuteToHHMM(w.endMinute)}
-                      </td>
-                      <td>{w.timezone}</td>
-                      <td>
-                        <button
-                          className="secondary"
-                          style={{ marginTop: 0 }}
-                          disabled={busy}
-                          onClick={() =>
-                            void run(async () => {
-                              await trpc.admin.removeAvailability.mutate({ id: w.id });
-                              await loadAvailability(availTeacherId);
-                            }, "Müsaitlik penceresi kaldırıldı")
-                          }
-                        >
-                          Kaldır
-                        </button>
-                      </td>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Gün</th>
+                      <th>Aralık</th>
+                      <th>Saat dilimi</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {availability.map((w) => (
+                      <tr key={w.id}>
+                        <td>{WEEKDAYS[w.weekday]}</td>
+                        <td className="mono">
+                          {minuteToHHMM(w.startMinute)}–{minuteToHHMM(w.endMinute)}
+                        </td>
+                        <td>{w.timezone}</td>
+                        <td>
+                          <button
+                            className="secondary"
+                            style={{ marginTop: 0 }}
+                            disabled={busy}
+                            onClick={() =>
+                              void run(async () => {
+                                await trpc.admin.removeAvailability.mutate({ id: w.id });
+                                await loadAvailability(availTeacherId);
+                              }, "Müsaitlik penceresi kaldırıldı")
+                            }
+                          >
+                            Kaldır
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             <form
@@ -1035,28 +1037,30 @@ export default function EgitmenlerPage() {
           Payout kapısı: 5 evrakın tamamı doğrulanmadan eğitmen ödemesi açılmaz.
         </p>
         {missing.length === 0 ? (
-          <p className="muted">Eksik evrak yok.</p>
+          <div className="empty">Eksik evrak yok.</div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Eğitmen</th>
-                <th>Evrak</th>
-                <th>Durum</th>
-              </tr>
-            </thead>
-            <tbody>
-              {missing.map((m) => (
-                <tr key={`${m.teacherId}-${m.kind}`}>
-                  <td>{m.fullName}</td>
-                  <td>{DOC_KIND_LABELS[m.kind]}</td>
-                  <td>
-                    <span className="badge warn">{DOC_STATUS_LABELS[m.status]}</span>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Eğitmen</th>
+                  <th>Evrak</th>
+                  <th>Durum</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {missing.map((m) => (
+                  <tr key={`${m.teacherId}-${m.kind}`}>
+                    <td>{m.fullName}</td>
+                    <td>{DOC_KIND_LABELS[m.kind]}</td>
+                    <td>
+                      <span className="badge warn">{DOC_STATUS_LABELS[m.status]}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </main>

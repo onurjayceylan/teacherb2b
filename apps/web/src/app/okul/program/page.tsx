@@ -506,9 +506,9 @@ export default function ProgramPage() {
       <div className="card">
         <h2>Reçeteler</h2>
         {plans.length === 0 ? (
-          <p className="muted">Henüz reçete yok.</p>
+          <div className="empty">Henüz reçete yok.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -546,10 +546,9 @@ export default function ProgramPage() {
                       </span>
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                      <div className="actions">
                         <button
                           className="secondary"
-                          style={{ marginTop: 0 }}
                           onClick={() => setSelectedPlanId(p.id === selectedPlanId ? null : p.id)}
                         >
                           {p.id === selectedPlanId ? "Slotları gizle" : "Slotlar"}
@@ -557,7 +556,6 @@ export default function ProgramPage() {
                         {p.status === "active" ? (
                           <button
                             className="secondary"
-                            style={{ marginTop: 0 }}
                             disabled={busy}
                             onClick={() =>
                               void run(
@@ -572,7 +570,6 @@ export default function ProgramPage() {
                         {p.status === "paused" ? (
                           <button
                             className="secondary"
-                            style={{ marginTop: 0 }}
                             disabled={busy}
                             onClick={() =>
                               void run(
@@ -586,7 +583,6 @@ export default function ProgramPage() {
                         ) : null}
                         <button
                           className="secondary"
-                          style={{ marginTop: 0 }}
                           disabled={busy}
                           onClick={() => toggleApplyPanel(p)}
                         >
@@ -594,8 +590,7 @@ export default function ProgramPage() {
                         </button>
                         {p.status === "active" || p.status === "paused" ? (
                           <button
-                            className="secondary"
-                            style={{ marginTop: 0 }}
+                            className="danger"
                             disabled={busy}
                             onClick={() => cancelPlan(p)}
                           >
@@ -659,7 +654,8 @@ export default function ProgramPage() {
                     </>
                   )}
                   {applyResults ? (
-                    <table style={{ marginTop: "0.75rem" }}>
+                    <div className="table-wrap" style={{ marginTop: "0.75rem" }}>
+                    <table>
                       <thead>
                         <tr>
                           <th>Sınıf</th>
@@ -688,6 +684,7 @@ export default function ProgramPage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   ) : null}
                 </div>
               );
@@ -731,9 +728,9 @@ export default function ProgramPage() {
           </form>
 
           {slots.length === 0 ? (
-            <p className="muted">Bu planda henüz slot yok.</p>
+            <div className="empty">Bu planda henüz slot yok.</div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
+            <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
@@ -774,11 +771,10 @@ export default function ProgramPage() {
                           )}
                         </td>
                         <td>
-                          <div style={{ display: "flex", gap: "0.35rem", alignItems: "center" }}>
+                          <div className="actions">
                             {s.status === "scheduled" && s.teacherName ? (
                               <button
                                 className="secondary"
-                                style={{ marginTop: 0 }}
                                 disabled={busy}
                                 onClick={() => fetchJoinLinks(s)}
                               >
@@ -787,8 +783,7 @@ export default function ProgramPage() {
                             ) : null}
                             {s.status === "scheduled" ? (
                               <button
-                                className="secondary"
-                                style={{ marginTop: 0 }}
+                                className="danger"
                                 disabled={busy}
                                 onClick={() => cancelSlot(s)}
                               >
@@ -798,7 +793,6 @@ export default function ProgramPage() {
                             {s.sessionId && s.settled ? (
                               <button
                                 className="secondary"
-                                style={{ marginTop: 0 }}
                                 disabled={busy}
                                 onClick={() => openDispute(s)}
                               >
@@ -809,7 +803,6 @@ export default function ProgramPage() {
                             (s.sessionStatus === "ended" || s.sessionStatus === "settled") ? (
                               <button
                                 className="secondary"
-                                style={{ marginTop: 0 }}
                                 disabled={busy}
                                 onClick={() => toggleAttendance(s)}
                               >

@@ -98,6 +98,13 @@ const PAYOUT_STATUS_LABELS: Record<string, { label: string; ok: boolean }> = {
   cancelled: { label: "cancelled", ok: false },
 };
 
+// Tablo içi küçük düğme: global boyutu bozmadan satıra sığdırır (yalnız sunum).
+const SMALL_BTN: React.CSSProperties = {
+  marginTop: 0,
+  padding: "0.3rem 0.75rem",
+  fontSize: "0.8rem",
+};
+
 export default function EgitmenPanelPage() {
   const params = useParams<{ token: string }>();
   const token = params?.token ?? "";
@@ -234,28 +241,124 @@ export default function EgitmenPanelPage() {
     }
   }
 
+  // Kimlik satırı rozetleri — panel verisinden türetilir (yalnız sunum):
+  // müsaitlik → teklif alabilirlik; payoutDetails → ödeme hazır mı; strike sayacı.
+  const strikesNearLimit = panel.strikeCount > 0 && panel.strikeCount >= panel.strikeLimit - 1;
+
   return (
     <main>
-      <h1>Hi {panel.teacherName}</h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.55rem",
+          flexWrap: "wrap",
+          marginBottom: "0.35rem",
+        }}
+      >
+        <h1 style={{ margin: 0 }}>Hi {panel.teacherName}</h1>
+        {panel.availability.length > 0 ? (
+          <span className="badge ok">Open to offers</span>
+        ) : (
+          <span className="badge warn">No availability set</span>
+        )}
+        {panel.payoutDetails ? (
+          <span className="badge ok">Payout details on file</span>
+        ) : (
+          <span className="badge warn">Payout details missing</span>
+        )}
+        <span className={`badge ${panel.strikeCount === 0 ? "ok" : "warn"}`}>
+          Strikes {panel.strikeCount}/{panel.strikeLimit}
+        </span>
+      </div>
       <p className="muted">All times are shown in {panel.timezone}.</p>
+
+      {!panel.payoutDetails ? (
+        <p>
+          <span className="badge warn">Action needed</span>{" "}
+          <span className="muted">
+            We have no payout details for you yet — add them in the{" "}
+            <a href="#payout-details">Payout details</a> section below so your earnings can be
+            paid out.
+          </span>
+        </p>
+      ) : null}
 
       {actionError ? <p className="error">{actionError}</p> : null}
       {notice ? <p className="success">{notice}</p> : null}
 
       <div className="card">
-        <h2>Your earnings balance</h2>
-        <p className="balance">{formatCents(panel.payableCents)}</p>
-        <p className="muted">Your per-lesson rate for each completed lesson accumulates here.</p>
-        <p className="muted">
-          Payouts run every 2 weeks via Wise, after your documents have been verified.
+        <h2>Earnings</h2>
+        <div className="stat-grid">
+          <div className="stat">
+            <div className="k">Earned this period</div>
+            <div className="v">{formatCents(panel.payableCents)}</div>
+          </div>
+          <div className="stat">
+            <div className="k">Upcoming lessons</div>
+            <div className="v">{panel.upcoming.length}</div>
+          </div>
+          <div className={strikesNearLimit ? "stat alert" : "stat"}>
+            <div className="k">No-show strikes</div>
+            <div className="v">
+              {panel.strikeCount}/{panel.strikeLimit}
+            </div>
+          </div>
+        </div>
+        <p className="muted" style={{ marginTop: "0.85rem", marginBottom: 0 }}>
+          Payouts run every 2 weeks via Wise, after your documents have been verified. Your
+          per-lesson rate for each completed lesson accumulates here. {panel.strikeLimit} no-show
+          strikes lead to suspension.
         </p>
-        <p>
-          No-show strikes:{" "}
-          <span className={`badge ${panel.strikeCount === 0 ? "ok" : "warn"}`}>
-            {panel.strikeCount}/{panel.strikeLimit}
-          </span>{" "}
-          <span className="muted">{panel.strikeLimit} strikes lead to suspension.</span>
-        </p>
+      </div>
+
+      <div className="card">
+        <h2>Upcoming lessons</h2>
+        {panel.upcoming.length === 0 ? (
+          <div className="empty">
+            No scheduled lessons — new offers will appear here as they come in.
+          </div>
+        ) : (
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date / time</th>
+                  <th>School / class</th>
+                  <th>Duration</th>
+                  <th>Rate</th>
+                  <th>Join</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {panel.upcoming.map((l) => (
+                  <tr key={l.slotId}>
+                    <td>{l.startsAtLocal}</td>
+                    <td>
+                      {l.schoolName} — {l.className}
+                    </td>
+                    <td>{l.durationMin} min</td>
+                    <td>{formatCents(l.teacherPayCents)}</td>
+                    <td>
+                      <a href={l.joinUrl}>Join lesson →</a>
+                    </td>
+                    <td>
+                      <button
+                        className="danger"
+                        style={SMALL_BTN}
+                        disabled={busy}
+                        onClick={() => dropLesson(l)}
+                      >
+                        Drop this lesson
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">
@@ -264,43 +367,46 @@ export default function EgitmenPanelPage() {
           These windows tell us when you can teach — new lesson offers are matched against them.
         </p>
         {panel.availability.length === 0 ? (
-          <p className="error">
-            No availability windows yet — add at least one to receive lesson offers.
-          </p>
+          <div className="empty">
+            <span className="badge warn">No availability windows yet</span>
+            <p style={{ marginBottom: 0 }}>Add at least one window below to receive lesson offers.</p>
+          </div>
         ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Day</th>
-                <th>Hours</th>
-                <th>Time zone</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {panel.availability.map((w) => (
-                <tr key={w.id}>
-                  <td>{WEEKDAYS_EN[w.weekday] ?? w.weekday}</td>
-                  <td>
-                    {minuteToHHMM(w.startMinute)}–{minuteToHHMM(w.endMinute)}
-                  </td>
-                  <td>{w.timezone}</td>
-                  <td>
-                    <button
-                      className="secondary"
-                      style={{ marginTop: 0 }}
-                      disabled={busy}
-                      onClick={() => removeAvailability(w.id)}
-                    >
-                      Remove
-                    </button>
-                  </td>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th>Hours</th>
+                  <th>Time zone</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {panel.availability.map((w) => (
+                  <tr key={w.id}>
+                    <td>{WEEKDAYS_EN[w.weekday] ?? w.weekday}</td>
+                    <td>
+                      {minuteToHHMM(w.startMinute)}–{minuteToHHMM(w.endMinute)}
+                    </td>
+                    <td>{w.timezone}</td>
+                    <td>
+                      <button
+                        className="secondary"
+                        style={SMALL_BTN}
+                        disabled={busy}
+                        onClick={() => removeAvailability(w.id)}
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-        <form onSubmit={addAvailability}>
+        <form onSubmit={addAvailability} style={{ marginTop: "0.9rem" }}>
           <div className="row">
             <div>
               <label htmlFor="av-day">Day</label>
@@ -342,20 +448,25 @@ export default function EgitmenPanelPage() {
               </button>
             </div>
           </div>
-          <p className="muted">Times are in your time zone ({panel.timezone}).</p>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Times are in your time zone ({panel.timezone}).
+          </p>
         </form>
       </div>
 
-      <div className="card">
+      <div className="card" id="payout-details">
         <h2>Payout details</h2>
         {panel.payoutDetails ? (
           <p>
-            {PAYOUT_METHOD_LABELS[panel.payoutDetails.method]}{" "}
-            <span className="mono">{panel.payoutDetails.maskedValue}</span> — account holder{" "}
-            {panel.payoutDetails.accountHolder}
+            <span className="badge info">{PAYOUT_METHOD_LABELS[panel.payoutDetails.method]}</span>{" "}
+            <span className="mono">{panel.payoutDetails.maskedValue}</span>{" "}
+            <span className="muted">— account holder {panel.payoutDetails.accountHolder}</span>
           </p>
         ) : (
-          <p className="error">Add your payout details to receive payments.</p>
+          <p>
+            <span className="badge warn">Missing</span>{" "}
+            <span className="muted">Add your payout details to receive payments.</span>
+          </p>
         )}
         {showPayoutForm ? (
           <form onSubmit={savePayoutDetails}>
@@ -396,7 +507,7 @@ export default function EgitmenPanelPage() {
                 />
               </div>
             </div>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
+            <div className="actions" style={{ marginTop: "0.9rem" }}>
               <button type="submit" disabled={busy}>
                 Save payout details
               </button>
@@ -420,9 +531,9 @@ export default function EgitmenPanelPage() {
       <div className="card">
         <h2>My payouts</h2>
         {panel.payouts.length === 0 ? (
-          <p className="muted">No payouts yet — payouts run every 2 weeks.</p>
+          <div className="empty">No payouts yet — payouts run every 2 weeks.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -453,64 +564,17 @@ export default function EgitmenPanelPage() {
             </table>
           </div>
         )}
-        <p className="muted">
+        <p className="muted" style={{ marginBottom: 0 }}>
           If a payout fails, your balance is protected — it carries over to the next payout run.
         </p>
       </div>
 
       <div className="card">
-        <h2>Your upcoming lessons</h2>
-        {panel.upcoming.length === 0 ? (
-          <p className="muted">No scheduled lessons — new offers will appear here as they come in.</p>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Date / time</th>
-                  <th>School / class</th>
-                  <th>Duration</th>
-                  <th>Rate</th>
-                  <th>Join</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {panel.upcoming.map((l) => (
-                  <tr key={l.slotId}>
-                    <td>{l.startsAtLocal}</td>
-                    <td>
-                      {l.schoolName} — {l.className}
-                    </td>
-                    <td>{l.durationMin} min</td>
-                    <td>{formatCents(l.teacherPayCents)}</td>
-                    <td>
-                      <a href={l.joinUrl}>Join lesson →</a>
-                    </td>
-                    <td>
-                      <button
-                        className="secondary"
-                        style={{ marginTop: 0 }}
-                        disabled={busy}
-                        onClick={() => dropLesson(l)}
-                      >
-                        Drop this lesson
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="card">
         <h2>Recent lessons (payment processed)</h2>
         {panel.settled.length === 0 ? (
-          <p className="muted">No completed lessons yet.</p>
+          <div className="empty">No completed lessons yet.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>

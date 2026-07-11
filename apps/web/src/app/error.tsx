@@ -32,10 +32,12 @@ export default function ErrorBoundary({
             Destek için hata kodu: <span className="mono">{error.digest}</span>
           </p>
         ) : null}
-        <button onClick={() => reset()}>Yeniden dene</button>{" "}
-        <button className="secondary" onClick={() => (window.location.href = "/")}>
-          Ana sayfaya dön
-        </button>
+        <div className="actions" style={{ marginTop: "0.9rem" }}>
+          <button onClick={() => reset()}>Yeniden dene</button>
+          <button className="secondary" onClick={() => (window.location.href = "/")}>
+            Ana sayfaya dön
+          </button>
+        </div>
       </div>
     </main>
   );

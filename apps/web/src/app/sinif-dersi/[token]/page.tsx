@@ -4,6 +4,7 @@
 // sınıf adı + "ders başladı / bekleniyor". PII yok, fiyat yok.
 // DİL: İKİ DİLLİ (kısa Türkçe + İngilizce) — sayfa okul/öğrenci projeksiyonuna açılıyor;
 // ders İngilizce, sınıf Türkiye'de. Tarihler iki formatta basılır (tr-TR + en-US).
+// TASARIM: projeksiyon sayfası — tipografi sınıfın arkasından okunacak kadar BÜYÜK.
 // NOT: SuperClass entegrasyonu geldiğinde bu sayfa (veya /join ucu) provider'ın
 // canlı ders URL'sine 302 yönlendirecek; token akışı değişmeden kalır.
 import { useCallback, useEffect, useState } from "react";
@@ -34,6 +35,25 @@ function formatInSchoolTz(at: Date, locale: "tr-TR" | "en-US", tz: string): stri
     return new Date(at).toLocaleString(locale);
   }
 }
+
+// Projeksiyon tipografisi (yalnız sunum): ana durum satırı, ikincil dil satırı, saat.
+const LEAD: React.CSSProperties = {
+  fontSize: "clamp(1.6rem, 4.5vw, 2.4rem)",
+  fontWeight: 700,
+  letterSpacing: "-0.02em",
+  lineHeight: 1.25,
+  margin: "0 0 0.4rem",
+};
+const LEAD_EN: React.CSSProperties = {
+  fontSize: "clamp(1.15rem, 3vw, 1.6rem)",
+  lineHeight: 1.3,
+  margin: "0 0 0.9rem",
+};
+const BODY_BIG: React.CSSProperties = {
+  fontSize: "clamp(1rem, 2.4vw, 1.25rem)",
+  lineHeight: 1.45,
+  margin: "0.35rem 0",
+};
 
 export default function SinifDersiPage() {
   const params = useParams<{ token: string }>();
@@ -67,14 +87,17 @@ export default function SinifDersiPage() {
 
   if (!status) {
     return (
-      <main>
+      <main style={{ textAlign: "center" }}>
         <h1>Sınıf dersi / Class lesson</h1>
-        <div className="card">
-          <p className="muted">
+        <div className="card" style={{ padding: "2rem 1.6rem" }}>
+          <p style={BODY_BIG}>
             Bu ders bağlantısı kullanılamıyor: geçersiz ya da süresi dolmuş olabilir.
           </p>
-          <p className="muted">
+          <p className="muted" style={BODY_BIG}>
             This lesson link cannot be used: it may be invalid or expired.
+          </p>
+          <p style={{ ...BODY_BIG, marginBottom: 0 }}>
+            <a href="/egitmen/link">Bağlantınızı mı kaybettiniz? / Lost your link? →</a>
           </p>
           {loadError ? <p className="muted">Ayrıntı / Details: {loadError}</p> : null}
         </div>
@@ -85,38 +108,55 @@ export default function SinifDersiPage() {
   const startsAt = new Date(status.startsAt);
 
   return (
-    <main>
-      <h1>{status.className}</h1>
-      <div className="card">
+    <main style={{ textAlign: "center" }}>
+      <h1 style={{ fontSize: "clamp(2.1rem, 6vw, 3.2rem)", marginBottom: "1.3rem" }}>
+        {status.className}
+      </h1>
+      <div className="card" style={{ padding: "2.4rem 1.8rem" }}>
         {status.ended ? (
           <>
-            <p>Ders sona erdi. Katıldığınız için teşekkürler!</p>
-            <p className="muted">The lesson has ended. Thank you for joining!</p>
+            <p style={LEAD}>Ders sona erdi. Katıldığınız için teşekkürler!</p>
+            <p className="muted" style={{ ...LEAD_EN, marginBottom: 0 }}>
+              The lesson has ended. Thank you for joining!
+            </p>
           </>
         ) : status.started ? (
           <>
-            <p className="success">Ders başladı! / The lesson has started!</p>
-            <p className="muted">
+            <p style={{ ...LEAD, color: "var(--ok)" }}>Ders başladı!</p>
+            <p style={{ ...LEAD_EN, color: "var(--ok)" }}>The lesson has started!</p>
+            <p className="muted" style={BODY_BIG}>
               Eğitmeniniz sizi bekliyor. (Canlı ders bağlantısı yakında burada otomatik
               açılacak.)
             </p>
-            <p className="muted">
+            <p className="muted" style={{ ...BODY_BIG, marginBottom: 0 }}>
               Your teacher is waiting for you. (The live lesson link will open here
               automatically soon.)
             </p>
           </>
         ) : (
           <>
-            <p>Ders bekleniyor… / Waiting for the lesson…</p>
-            <p className="muted">
-              Planlanan başlangıç: {formatInSchoolTz(startsAt, "tr-TR", status.schoolTz)} (
-              {status.schoolTz} saati). Eğitmen dersi başlattığında bu sayfa kendini
-              yenileyecek.
+            <p style={LEAD}>Ders bekleniyor…</p>
+            <p className="muted" style={LEAD_EN}>Waiting for the lesson…</p>
+            <p
+              style={{
+                fontSize: "clamp(1.5rem, 4vw, 2.2rem)",
+                fontWeight: 700,
+                letterSpacing: "-0.02em",
+                fontVariantNumeric: "tabular-nums",
+                margin: "0.6rem 0 0.15rem",
+              }}
+            >
+              {formatInSchoolTz(startsAt, "tr-TR", status.schoolTz)}
             </p>
-            <p className="muted">
-              Scheduled start: {formatInSchoolTz(startsAt, "en-US", status.schoolTz)} (
-              {status.schoolTz} time). This page will refresh automatically when your teacher
-              starts the lesson.
+            <p className="muted" style={{ ...BODY_BIG, marginTop: 0 }}>
+              Planlanan başlangıç ({status.schoolTz} saati) / Scheduled start:{" "}
+              {formatInSchoolTz(startsAt, "en-US", status.schoolTz)} ({status.schoolTz} time)
+            </p>
+            <p className="muted" style={BODY_BIG}>
+              Eğitmen dersi başlattığında bu sayfa kendini yenileyecek.
+            </p>
+            <p className="muted" style={{ ...BODY_BIG, marginBottom: 0 }}>
+              This page will refresh automatically when your teacher starts the lesson.
             </p>
           </>
         )}

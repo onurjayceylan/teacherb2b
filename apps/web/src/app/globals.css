@@ -1,83 +1,174 @@
-/* Minimal-temiz S1 kabuğu — Tailwind yok, tek global dosya yeter. */
+/* Teachernow tasarım sistemi — "liquid glass" (Apple 2026 iOS esintili, light).
+   Kural: SIFIR UI kütüphanesi — saf CSS + system font. Mevcut sınıf adları
+   (card/badge/muted/mono/row/topbar/shell/balance/error/success) aynen korunur ki
+   tüm sayfalar merkezi olarak dönüşsün; yeni yardımcılar (stat/table-wrap/empty/
+   actions/hero) sayfa cilası için eklendi. */
+
 :root {
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --border: #e2e5ea;
-  --text: #1b2430;
-  --muted: #66707d;
-  --accent: #2456d6;
-  --accent-dark: #1c44ab;
-  --danger: #b3261e;
-  --ok: #1a7f37;
+  /* mürekkep + yüzeyler */
+  --ink: #16181d;
+  --muted: #6b7280;
+  --bg: #f4f5f9;
+  --glass: rgba(255, 255, 255, 0.62);
+  --glass-strong: rgba(255, 255, 255, 0.8);
+  --hairline: rgba(22, 24, 29, 0.08);
+  --glass-edge: rgba(255, 255, 255, 0.65);
+
+  /* iOS paleti (light) */
+  --accent: #0a7cff;
+  --accent-deep: #0063d6;
+  --ok: #1d8a3a;
+  --ok-tint: rgba(52, 199, 89, 0.16);
+  --danger: #c2251c;
+  --danger-strong: #e0281d;
+  --danger-tint: rgba(255, 59, 48, 0.12);
+  --info-tint: rgba(10, 124, 255, 0.1);
+
+  /* biçim */
+  --r-lg: 22px;
+  --r-md: 14px;
+  --r-sm: 11px;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 10px 30px rgba(16, 24, 40, 0.07);
+  --shadow-float: 0 2px 6px rgba(16, 24, 40, 0.06), 0 18px 44px rgba(16, 24, 40, 0.1);
+  --blur: saturate(180%) blur(22px);
 }
 
 * {
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable", "Segoe UI",
+    system-ui, Roboto, sans-serif;
+  color: var(--ink);
+  line-height: 1.55;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  background-color: var(--bg);
+  /* sıvı arka plan: sabit, çok hafif renk buğusu — cam yüzeyler bunun üstünde yüzer */
+  background-image:
+    radial-gradient(52rem 36rem at 12% -6%, rgba(96, 156, 255, 0.2), transparent 62%),
+    radial-gradient(44rem 30rem at 96% 4%, rgba(255, 158, 214, 0.14), transparent 60%),
+    radial-gradient(56rem 40rem at 50% 112%, rgba(94, 222, 187, 0.13), transparent 64%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(10, 124, 255, 0.22);
 }
 
 .shell {
-  max-width: 880px;
+  max-width: 940px;
   margin: 0 auto;
-  padding: 0 1rem 4rem;
+  padding: 0 1.1rem 5rem;
 }
 
+/* ---------- üst çubuk: yüzen buzlu-cam hap ---------- */
 .topbar {
+  position: sticky;
+  top: 0.9rem;
+  z-index: 50;
   display: flex;
-  align-items: baseline;
-  gap: 1.25rem;
-  padding: 1rem 0;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1.5rem;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.9rem 0 1.8rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-edge);
+  outline: 1px solid var(--hairline);
+  outline-offset: -1px;
+  border-radius: 999px;
+  box-shadow: var(--shadow-card);
 }
 
 .topbar .brand {
-  font-size: 1.15rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.02rem;
   font-weight: 700;
-  color: var(--text);
+  letter-spacing: -0.01em;
+  color: var(--ink);
   text-decoration: none;
+  margin-right: 0.6rem;
+  padding: 0.25rem 0.55rem;
 }
 
-.topbar a {
+.topbar .brand::before {
+  content: "";
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background:
+    radial-gradient(120% 120% at 20% 15%, rgba(255, 255, 255, 0.55), transparent 55%),
+    linear-gradient(135deg, #35a1ff 0%, #0a7cff 55%, #7a5cff 120%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 2px 6px rgba(10, 124, 255, 0.35);
+}
+
+.topbar a:not(.brand) {
   color: var(--muted);
   text-decoration: none;
-  font-size: 0.95rem;
+  font-size: 0.92rem;
+  font-weight: 500;
+  padding: 0.32rem 0.8rem;
+  border-radius: 999px;
+  transition: background 0.16s ease, color 0.16s ease;
 }
 
-.topbar a:hover {
+.topbar a:not(.brand):hover {
   color: var(--accent);
+  background: var(--info-tint);
 }
 
+/* ---------- tipografi ---------- */
 h1 {
-  font-size: 1.4rem;
-  margin: 0 0 1rem;
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.022em;
+  margin: 0 0 1.1rem;
 }
 
 h2 {
-  font-size: 1.05rem;
-  margin: 0 0 0.75rem;
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.012em;
+  margin: 0 0 0.7rem;
 }
 
+p {
+  margin: 0.4rem 0 0.8rem;
+}
+
+/* ---------- cam kart ---------- */
 .card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.25rem;
-  margin-bottom: 1.25rem;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-edge);
+  outline: 1px solid var(--hairline);
+  outline-offset: -1px;
+  border-radius: var(--r-lg);
+  padding: 1.35rem 1.4rem;
+  margin-bottom: 1.15rem;
+  box-shadow: var(--shadow-card);
 }
 
+/* ---------- form ---------- */
 label {
   display: block;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  font-weight: 550;
   color: var(--muted);
-  margin: 0.6rem 0 0.2rem;
+  margin: 0.65rem 0 0.25rem;
 }
 
 input,
@@ -85,51 +176,97 @@ select,
 textarea {
   width: 100%;
   max-width: 26rem;
-  padding: 0.5rem 0.65rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-sm);
   font-size: 0.95rem;
-  background: #fff;
-  color: var(--text);
+  font-family: inherit;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #9aa1ad;
 }
 
 input:focus,
 select:focus,
 textarea:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-color: var(--accent);
+  outline: none;
+  border-color: rgba(10, 124, 255, 0.65);
+  box-shadow: 0 0 0 4px rgba(10, 124, 255, 0.16);
 }
 
+/* ---------- düğmeler ---------- */
 button {
   margin-top: 0.9rem;
-  padding: 0.5rem 1.1rem;
+  padding: 0.52rem 1.15rem;
   border: none;
-  border-radius: 8px;
-  background: var(--accent);
+  border-radius: var(--r-sm);
+  background: linear-gradient(180deg, #2f97ff, var(--accent) 78%);
   color: #fff;
-  font-size: 0.95rem;
+  font-size: 0.93rem;
   font-weight: 600;
+  font-family: inherit;
+  letter-spacing: 0.002em;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.32), 0 2px 8px rgba(10, 124, 255, 0.3);
+  transition: transform 0.12s ease, box-shadow 0.16s ease, background 0.16s ease, opacity 0.16s ease;
 }
 
 button:hover:not(:disabled) {
-  background: var(--accent-dark);
+  background: linear-gradient(180deg, #1f8bff, var(--accent-deep) 82%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 4px 14px rgba(10, 124, 255, 0.36);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.975);
 }
 
 button:disabled {
-  background: #aeb6c2;
+  background: #b7bdc9;
+  box-shadow: none;
   cursor: not-allowed;
 }
 
 button.secondary {
-  background: transparent;
+  background: rgba(255, 255, 255, 0.66);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
   color: var(--accent);
-  border: 1px solid var(--accent);
+  border: 1px solid rgba(10, 124, 255, 0.35);
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.05);
 }
 
 button.secondary:hover:not(:disabled) {
-  background: #eef2fc;
+  background: var(--info-tint);
+  box-shadow: 0 2px 8px rgba(10, 124, 255, 0.14);
+}
+
+button.danger {
+  background: linear-gradient(180deg, #ff5147, var(--danger-strong) 80%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 2px 8px rgba(224, 40, 29, 0.3);
+}
+
+button.danger:hover:not(:disabled) {
+  background: linear-gradient(180deg, #f2453b, #c81f15 82%);
+}
+
+/* klavye odağı her kontrol için görünür (erişilebilirlik) */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ---------- tablo: iOS inset-grouped his ---------- */
+.table-wrap {
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.45);
 }
 
 table {
@@ -141,15 +278,33 @@ table {
 th,
 td {
   text-align: left;
-  padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--hairline);
+  vertical-align: top;
 }
 
 th {
   color: var(--muted);
   font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+tbody tr {
+  transition: background 0.12s ease;
+}
+
+tbody tr:hover {
+  background: rgba(10, 124, 255, 0.045);
+}
+
+/* ---------- durum metinleri ---------- */
 .error {
   color: var(--danger);
   font-size: 0.9rem;
@@ -167,33 +322,49 @@ th {
   font-size: 0.88rem;
 }
 
+/* ---------- sayılar ---------- */
 .balance {
-  font-size: 2rem;
+  font-size: 2.15rem;
   font-weight: 700;
-}
-
-.badge {
-  display: inline-block;
-  padding: 0.1rem 0.55rem;
-  border-radius: 999px;
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.badge.ok {
-  background: #e3f3e8;
-  color: var(--ok);
-}
-
-.badge.warn {
-  background: #fdeceb;
-  color: var(--danger);
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
 }
 
 .mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+  font-size: 0.86em;
 }
 
+/* ---------- rozetler: renk buğulu cam haplar ---------- */
+.badge {
+  display: inline-block;
+  padding: 0.14rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+
+.badge.ok {
+  background: var(--ok-tint);
+  color: var(--ok);
+  border-color: rgba(52, 199, 89, 0.25);
+}
+
+.badge.warn {
+  background: var(--danger-tint);
+  color: var(--danger);
+  border-color: rgba(255, 59, 48, 0.22);
+}
+
+.badge.info {
+  background: var(--info-tint);
+  color: var(--accent-deep);
+  border-color: rgba(10, 124, 255, 0.22);
+}
+
+/* ---------- yerleşim yardımcıları ---------- */
 .row {
   display: flex;
   gap: 1rem;
@@ -203,4 +374,140 @@ th {
 
 .row > div {
   flex: 1 1 14rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.actions button {
+  margin-top: 0;
+}
+
+/* istatistik karoları (sağlık şeridi, cüzdan özeti) */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.7rem;
+}
+
+.stat {
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-md);
+  padding: 0.75rem 0.9rem;
+}
+
+.stat .k {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat .v {
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.1rem;
+}
+
+.stat.alert {
+  background: var(--danger-tint);
+  border-color: rgba(255, 59, 48, 0.25);
+}
+
+.stat.alert .v {
+  color: var(--danger);
+}
+
+/* boş durum */
+.empty {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  padding: 1.6rem 1rem;
+  border: 1px dashed var(--hairline);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* açılış (landing) kahramanı */
+.hero {
+  text-align: center;
+  padding: 3.2rem 1rem 2.6rem;
+}
+
+.hero h1 {
+  font-size: 2.3rem;
+  letter-spacing: -0.032em;
+  margin-bottom: 0.6rem;
+  background: linear-gradient(120deg, #16181d 30%, #0a7cff 75%, #7a5cff 105%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero p {
+  max-width: 34rem;
+  margin: 0 auto 1.3rem;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+/* ince kaydırma çubuğu */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(22, 24, 29, 0.18);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* hareket azaltma tercihi */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+/* dar ekran */
+@media (max-width: 640px) {
+  .shell {
+    padding: 0 0.8rem 4rem;
+  }
+
+  .topbar {
+    top: 0.5rem;
+    flex-wrap: wrap;
+    border-radius: var(--r-lg);
+  }
+
+  h1 {
+    font-size: 1.32rem;
+  }
+
+  .hero h1 {
+    font-size: 1.7rem;
+  }
 }

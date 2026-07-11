@@ -31,42 +31,36 @@ export default function EgitmenLinkPage() {
   return (
     <main>
       <h1>Get a new panel link</h1>
-      <div className="card">
+      <div className="card" style={{ maxWidth: "30rem" }}>
         {sent ? (
           <>
-            <p className="success">
+            <p className="success" style={{ marginTop: 0 }}>
               If this email is registered, a new panel link has been sent.
             </p>
-            <p className="muted">
+            <p className="muted" style={{ marginBottom: 0 }}>
               Please check your inbox (and spam folder). You can request another link in a few
               minutes if it does not arrive.
             </p>
           </>
         ) : (
           <>
-            <p className="muted">
+            <p className="muted" style={{ marginTop: 0 }}>
               Lost your teacher panel link? Enter the email address you use with Teachernow and
               we will send you a new one.
             </p>
             <form onSubmit={submit}>
-              <div className="row">
-                <div>
-                  <label htmlFor="tl-email">Your email address</label>
-                  <input
-                    id="tl-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    required
-                  />
-                </div>
-                <div>
-                  <button type="submit" disabled={busy}>
-                    {busy ? "Sending…" : "Send me a new link"}
-                  </button>
-                </div>
-              </div>
+              <label htmlFor="tl-email">Your email address</label>
+              <input
+                id="tl-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+              <button type="submit" disabled={busy}>
+                {busy ? "Sending…" : "Send me a new link"}
+              </button>
             </form>
             {error ? <p className="error">{error}</p> : null}
           </>

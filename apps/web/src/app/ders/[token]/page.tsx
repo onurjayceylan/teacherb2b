@@ -31,6 +31,30 @@ interface Room {
   roster: RosterEntry[];
 }
 
+// Yoklama toggle düğmeleri: seçili durum renk-buğulu vurgu alır (yalnız sunum;
+// state modeli aynı — true=present, false=absent, undefined=unmarked).
+const TOGGLE_BTN: React.CSSProperties = {
+  marginTop: 0,
+  padding: "0.3rem 0.85rem",
+  fontSize: "0.8rem",
+};
+const TOGGLE_PRESENT_ON: React.CSSProperties = {
+  ...TOGGLE_BTN,
+  background: "var(--ok-tint)",
+  color: "var(--ok)",
+  borderColor: "rgba(52, 199, 89, 0.45)",
+};
+const TOGGLE_ABSENT_ON: React.CSSProperties = {
+  ...TOGGLE_BTN,
+  background: "var(--danger-tint)",
+  color: "var(--danger)",
+  borderColor: "rgba(255, 59, 48, 0.4)",
+};
+const BIG_BTN: React.CSSProperties = {
+  padding: "0.7rem 1.8rem",
+  fontSize: "1.02rem",
+};
+
 export default function DersPage() {
   const params = useParams<{ token: string }>();
   const token = params?.token ?? "";
@@ -147,6 +171,9 @@ export default function DersPage() {
             This lesson link cannot be used: it may be invalid, expired, or the lesson assignment
             may have changed.
           </p>
+          <p>
+            <a href="/egitmen/link">Lost your link? Request a new one →</a>
+          </p>
           {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>
       </main>
@@ -159,14 +186,40 @@ export default function DersPage() {
 
   return (
     <main>
-      <h1>
-        {room.className} — lesson room
-      </h1>
-      <p className="muted">
-        Hi {room.teacherName}. {room.startsAtLocal}{" "}
-        <span className="muted">({room.timezone} time)</span> · {room.durationMin} min ·
-        your rate <strong>{formatCents(room.teacherPayCents)}</strong>
-      </p>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "0.55rem",
+          flexWrap: "wrap",
+          marginBottom: "0.35rem",
+        }}
+      >
+        <h1 style={{ margin: 0 }}>{room.className} — lesson room</h1>
+        {started ? <span className="badge info">In progress</span> : null}
+        {done ? <span className="badge ok">Completed</span> : null}
+      </div>
+      <p className="muted">Hi {room.teacherName}.</p>
+
+      <div className="card">
+        <div className="stat-grid">
+          <div className="stat">
+            <div className="k">Starts</div>
+            <div className="v" style={{ fontSize: "1.02rem", lineHeight: 1.4 }}>
+              {room.startsAtLocal}
+            </div>
+            <div className="muted" style={{ fontSize: "0.78rem" }}>{room.timezone} time</div>
+          </div>
+          <div className="stat">
+            <div className="k">Duration</div>
+            <div className="v">{room.durationMin} min</div>
+          </div>
+          <div className="stat">
+            <div className="k">Your rate</div>
+            <div className="v">{formatCents(room.teacherPayCents)}</div>
+          </div>
+        </div>
+      </div>
 
       {actionError ? <p className="error">{actionError}</p> : null}
       {notice ? <p className="success">{notice}</p> : null}
@@ -174,15 +227,25 @@ export default function DersPage() {
       {finished ? (
         <div className="card">
           {finished.reviewRequired ? (
-            <p className="success">
-              Lesson recorded: {finished.dosageMin} min. Because it was unusually short, payment
-              is pending a quick review by our team.
-            </p>
+            <>
+              <p style={{ marginTop: 0 }}>
+                <span className="badge info">Under review</span>
+              </p>
+              <p style={{ marginBottom: 0 }}>
+                Lesson recorded: {finished.dosageMin} min. Because it was unusually short, payment
+                is pending a quick review by our team.
+              </p>
+            </>
           ) : (
-            <p className="success">
-              Lesson recorded: {finished.dosageMin} min. Your payment has been credited to your
-              balance.
-            </p>
+            <>
+              <p style={{ marginTop: 0 }}>
+                <span className="badge ok">Payment processed</span>
+              </p>
+              <p className="success" style={{ marginBottom: 0 }}>
+                Lesson recorded: {finished.dosageMin} min. Your payment has been credited to your
+                balance.
+              </p>
+            </>
           )}
         </div>
       ) : null}
@@ -195,6 +258,7 @@ export default function DersPage() {
             automatically.
           </p>
           <button
+            style={BIG_BTN}
             disabled={busy}
             onClick={() =>
               void run(() => trpc.session.start.mutate({ token }), "Lesson started — have a great class!")
@@ -209,61 +273,100 @@ export default function DersPage() {
         <div className="card">
           <h2>Attendance</h2>
           {room.roster.length === 0 ? (
-            <p className="muted">There are no students enrolled in this class.</p>
+            <div className="empty">There are no students enrolled in this class.</div>
           ) : done ? (
-            <table>
-              <thead>
-                <tr>
-                  <th>Student</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {room.roster.map((s) => (
-                  <tr key={s.studentId}>
-                    <td>{s.name}</td>
-                    <td>
-                      {s.present === null ? (
-                        <span className="muted">not marked</span>
-                      ) : s.present ? (
-                        <span className="badge ok">present</span>
-                      ) : (
-                        <span className="badge warn">absent</span>
-                      )}
-                    </td>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Status</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {room.roster.map((s) => (
+                    <tr key={s.studentId}>
+                      <td>{s.name}</td>
+                      <td>
+                        {s.present === null ? (
+                          <span className="muted">not marked</span>
+                        ) : s.present ? (
+                          <span className="badge ok">present</span>
+                        ) : (
+                          <span className="badge warn">absent</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <>
               <p className="muted">
-                Check the students who attended the lesson. Students start unmarked — anyone left
+                Mark each student who attended the lesson. Students start unmarked — anyone left
                 unmarked when you finish will be recorded as absent.
               </p>
-              <ul style={{ listStyle: "none", padding: 0 }}>
-                {room.roster.map((s) => (
-                  <li key={s.studentId} style={{ marginBottom: "0.35rem" }}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        style={{ width: "auto", marginRight: "0.5rem" }}
-                        checked={checks[s.studentId] ?? false}
-                        onChange={(e) =>
-                          setChecks({ ...checks, [s.studentId]: e.target.checked })
-                        }
-                      />
-                      {s.name}
-                      {s.present !== null ? (
-                        <span className="muted"> (saved: {s.present ? "present" : "absent"})</span>
-                      ) : (
-                        <span className="muted"> (unmarked)</span>
-                      )}
-                    </label>
-                  </li>
-                ))}
-              </ul>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Mark</th>
+                      <th>Saved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {room.roster.map((s) => {
+                      const mark = checks[s.studentId];
+                      return (
+                        <tr key={s.studentId}>
+                          <td>{s.name}</td>
+                          <td>
+                            <div className="actions" style={{ gap: "0.4rem" }}>
+                              <button
+                                type="button"
+                                className="secondary"
+                                style={mark === true ? TOGGLE_PRESENT_ON : TOGGLE_BTN}
+                                aria-pressed={mark === true}
+                                disabled={busy}
+                                onClick={() => setChecks({ ...checks, [s.studentId]: true })}
+                              >
+                                Present
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                style={mark === false ? TOGGLE_ABSENT_ON : TOGGLE_BTN}
+                                aria-pressed={mark === false}
+                                disabled={busy}
+                                onClick={() => setChecks({ ...checks, [s.studentId]: false })}
+                              >
+                                Absent
+                              </button>
+                              {mark === undefined ? (
+                                <span className="muted" style={{ fontSize: "0.8rem" }}>
+                                  unmarked
+                                </span>
+                              ) : null}
+                            </div>
+                          </td>
+                          <td>
+                            {s.present === null ? (
+                              <span className="muted">—</span>
+                            ) : s.present ? (
+                              <span className="badge ok">present</span>
+                            ) : (
+                              <span className="badge warn">absent</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <div className="actions" style={{ marginTop: "0.9rem" }}>
                 <button className="secondary" disabled={busy} onClick={markAllPresent}>
                   Mark all present
                 </button>
@@ -283,7 +386,7 @@ export default function DersPage() {
             When you finish, the lesson duration is finalized and your payment is credited to
             your balance.
           </p>
-          <button disabled={busy} onClick={finishLesson}>
+          <button style={BIG_BTN} disabled={busy} onClick={finishLesson}>
             Finish lesson
           </button>
         </div>
@@ -292,12 +395,27 @@ export default function DersPage() {
       {done && !finished ? (
         <div className="card">
           <h2>Lesson completed</h2>
-          <p className="success">
-            Lesson recorded: {room.dosageMin ?? room.durationMin} min.
-            {room.sessionStatus === "settled"
-              ? " Your payment has been credited to your balance."
-              : " Payment is pending a quick review by our team."}
-          </p>
+          {room.sessionStatus === "settled" ? (
+            <>
+              <p style={{ marginTop: 0 }}>
+                <span className="badge ok">Payment processed</span>
+              </p>
+              <p className="success" style={{ marginBottom: 0 }}>
+                Lesson recorded: {room.dosageMin ?? room.durationMin} min. Your payment has been
+                credited to your balance.
+              </p>
+            </>
+          ) : (
+            <>
+              <p style={{ marginTop: 0 }}>
+                <span className="badge info">Under review</span>
+              </p>
+              <p style={{ marginBottom: 0 }}>
+                Lesson recorded: {room.dosageMin ?? room.durationMin} min. Payment is pending a
+                quick review by our team.
+              </p>
+            </>
+          )}
         </div>
       ) : null}
     </main>

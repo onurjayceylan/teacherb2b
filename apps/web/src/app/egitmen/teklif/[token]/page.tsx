@@ -84,14 +84,24 @@ export default function TeklifPage() {
         <div className="card">
           {result.kind === "accepted" ? (
             <>
-              <p className="success">You accepted the offer — the lesson has been added to your schedule.</p>
-              <p className="muted">The Teachernow team will be in touch with the lesson details.</p>
+              <p>
+                <span className="badge ok">Accepted</span>
+              </p>
+              <p className="success">
+                You accepted the offer — the lesson has been added to your schedule.
+              </p>
+              <p className="muted" style={{ marginBottom: 0 }}>
+                The Teachernow team will be in touch with the lesson details.
+              </p>
             </>
           ) : null}
           {result.kind === "declined" ? (
             <>
+              <p>
+                <span className="badge info">Declined</span>
+              </p>
               <p>You declined the offer.</p>
-              <p className="muted">
+              <p className="muted" style={{ marginBottom: 0 }}>
                 No problem — you will receive new offers for lessons that match your availability.
               </p>
             </>
@@ -102,7 +112,7 @@ export default function TeklifPage() {
                 This offer is no longer valid: it may have expired or the lesson may have been
                 assigned to another teacher. We will reach out as new offers come in.
               </p>
-              <p>
+              <p style={{ marginBottom: 0 }}>
                 <a href="/egitmen/link">Lost your panel link? Request a new one →</a>
               </p>
             </>
@@ -138,46 +148,43 @@ export default function TeklifPage() {
       {actionError ? <p className="error">{actionError}</p> : null}
 
       <div className="card">
-        <table>
-          <tbody>
-            <tr>
-              <th>School</th>
-              <td>{offer.schoolName}</td>
-            </tr>
-            <tr>
-              <th>Class</th>
-              <td>{offer.className}</td>
-            </tr>
-            <tr>
-              <th>Course</th>
-              <td>{offer.poolName}</td>
-            </tr>
-            <tr>
-              <th>Date / time</th>
-              <td>
-                {offer.startsAtLocal}{" "}
-                <span className="muted">({offer.timezone} time)</span>
-              </td>
-            </tr>
-            <tr>
-              <th>Duration</th>
-              <td>{offer.durationMin} minutes</td>
-            </tr>
-            <tr>
-              <th>Your rate for this lesson</th>
-              <td>
-                <strong>{formatCents(offer.teacherPayCents)}</strong>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p className="muted">
-          This offer expires on {offer.expiresAtLocal}{" "}
-          <span className="muted">({offer.timezone} time)</span>. If you do not respond, the
-          lesson will be offered to the next teacher.
+        <h2>
+          {offer.schoolName} — {offer.className}
+        </h2>
+        <p className="muted">Course: {offer.poolName}</p>
+
+        <div className="stat-grid">
+          <div className="stat">
+            <div className="k">Date / time</div>
+            <div className="v" style={{ fontSize: "1.02rem", lineHeight: 1.4 }}>
+              {offer.startsAtLocal}
+            </div>
+            <div className="muted" style={{ fontSize: "0.78rem" }}>{offer.timezone} time</div>
+          </div>
+          <div className="stat">
+            <div className="k">Duration</div>
+            <div className="v">{offer.durationMin} min</div>
+          </div>
+          <div className="stat">
+            <div className="k">Your rate for this lesson</div>
+            <div className="v">{formatCents(offer.teacherPayCents)}</div>
+          </div>
+        </div>
+
+        <p style={{ marginTop: "1rem" }}>
+          <span className="badge warn">Expires {offer.expiresAtLocal}</span>{" "}
+          <span className="muted">
+            ({offer.timezone} time). If you do not respond, the lesson will be offered to the
+            next teacher.
+          </span>
         </p>
-        <div style={{ display: "flex", gap: "0.75rem" }}>
-          <button disabled={busy} onClick={() => void respond("accept")}>
+
+        <div className="actions" style={{ marginTop: "0.9rem" }}>
+          <button
+            style={{ marginTop: 0, padding: "0.65rem 1.7rem", fontSize: "1rem" }}
+            disabled={busy}
+            onClick={() => void respond("accept")}
+          >
             Accept
           </button>
           <button className="secondary" disabled={busy} onClick={() => void respond("decline")}>

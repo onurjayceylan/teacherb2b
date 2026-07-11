@@ -37,27 +37,37 @@ export default function HomePage() {
 
   return (
     <main>
-      <h1>{mode === "signin" ? "Giriş yap" : "Hesap oluştur"}</h1>
+      <section className="hero">
+        <h1>Okulunuz için native speaking club dersleri</h1>
+        <p>
+          Doğrulanmış eğitmen havuzu, otomatik ders planlama ve tek panelden yönetim — kayıttan
+          ilk ders reçetenize 15 dakikada ulaşın.
+        </p>
+      </section>
 
       {!isPending && session ? (
         <div className="card">
+          <h2>Oturum açık</h2>
           <p>
-            Oturum açık: <strong>{session.user.email}</strong>
+            <strong>{session.user.email}</strong> olarak giriş yaptınız.
           </p>
-          <button onClick={() => router.push("/okul")}>Okul paneline git</button>{" "}
-          <button
-            className="secondary"
-            onClick={async () => {
-              await authClient.signOut();
-              router.refresh();
-            }}
-          >
-            Çıkış yap
-          </button>
+          <div className="actions" style={{ marginTop: "0.9rem" }}>
+            <button onClick={() => router.push("/okul")}>Okul paneline git</button>
+            <button
+              className="secondary"
+              onClick={async () => {
+                await authClient.signOut();
+                router.refresh();
+              }}
+            >
+              Çıkış yap
+            </button>
+          </div>
         </div>
       ) : null}
 
       <div className="card">
+        <h2>{mode === "signin" ? "Giriş yap" : "Hesap oluştur"}</h2>
         <form onSubmit={submit}>
           {mode === "signup" ? (
             <>
@@ -91,23 +101,46 @@ export default function HomePage() {
             autoComplete={mode === "signin" ? "current-password" : "new-password"}
           />
           {error ? <p className="error">{error}</p> : null}
-          <button type="submit" disabled={busy}>
-            {busy ? "Bekleyin…" : mode === "signin" ? "Giriş yap" : "Kayıt ol"}
-          </button>{" "}
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => {
-              setMode(mode === "signin" ? "signup" : "signin");
-              setError(null);
-            }}
-          >
-            {mode === "signin" ? "Hesabın yok mu? Kayıt ol" : "Zaten üye misin? Giriş yap"}
-          </button>
+          <div className="actions" style={{ marginTop: "0.9rem" }}>
+            <button type="submit" disabled={busy}>
+              {busy ? "Bekleyin…" : mode === "signin" ? "Giriş yap" : "Kayıt ol"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                setMode(mode === "signin" ? "signup" : "signin");
+                setError(null);
+              }}
+            >
+              {mode === "signin" ? "Hesabın yok mu? Kayıt ol" : "Zaten üye misin? Giriş yap"}
+            </button>
+          </div>
         </form>
       </div>
 
-      <p className="muted">
+      <div className="stat-grid" style={{ marginBottom: "1.15rem" }}>
+        <div className="stat">
+          <div className="k">Doğrulanmış eğitmenler</div>
+          <p className="muted" style={{ margin: "0.4rem 0 0" }}>
+            Evrak kontrolü ve görüşme sürecinden geçmiş native eğitmen havuzu.
+          </p>
+        </div>
+        <div className="stat">
+          <div className="k">Otomatik planlama</div>
+          <p className="muted" style={{ margin: "0.4rem 0 0" }}>
+            Haftalık reçeteniz derslere dönüşür; eğitmen araması kendiliğinden başlar.
+          </p>
+        </div>
+        <div className="stat">
+          <div className="k">SLA garantili yedekleme</div>
+          <p className="muted" style={{ margin: "0.4rem 0 0" }}>
+            Eğitmen düşerse sistem yeniden eğitmen arar; karşılanamayan dersin ücreti iade edilir.
+          </p>
+        </div>
+      </div>
+
+      <p className="muted" style={{ textAlign: "center" }}>
         Girişten sonra okulunuz yoksa <a href="/baslangic">başlangıç sihirbazı</a> ile devam edin.
       </p>
     </main>

@@ -89,29 +89,57 @@ const COMMON_TIMEZONES = [
   "Australia/Sydney",
 ];
 
-const CONTRACT_PLACEHOLDER = `TEACHER SERVICES AGREEMENT (SUMMARY — PILOT PLACEHOLDER)
-
-1. Parties: The Teachernow platform and the teacher named below.
-2. Scope: The teacher delivers online lessons to schools through the platform as an
-   independent contractor.
-3. Pay: You are paid per lesson. Your per-lesson rate is shown on every offer you
-   receive and in your teacher panel before you accept any lesson.
-4. Payouts: Payouts run every 2 weeks via Wise. Payouts start only after your
-   document set has been verified by our team.
-5. Cancellations: If a school cancels a lesson less than 24 hours before its start
-   time, you are paid 50% of your per-lesson rate for that lesson.
-6. No-shows: Missing a confirmed lesson without notice is recorded as a no-show.
-   Repeated no-shows may lead to suspension from the platform (3 strikes).
-7. Confidentiality: Student and school data must not be shared with third parties.
-8. Termination: Either party may end this agreement with 14 days written notice.
-
-This is a pilot-period agreement; the final version is subject to legal review and
-will replace this text. By typing your name and confirming below you accept this
-agreement electronically.`;
+// Sözleşme metni — içerik CONTRACT_PLACEHOLDER ile bire bir aynı; yalnız okunur
+// tipografi (başlık + numaralı madde listesi) için yapılandırıldı.
+const CONTRACT_TITLE = "Teacher Services Agreement (summary — pilot placeholder)";
+const CONTRACT_CLAUSES: { term: string; text: string }[] = [
+  { term: "Parties", text: "The Teachernow platform and the teacher named below." },
+  {
+    term: "Scope",
+    text: "The teacher delivers online lessons to schools through the platform as an independent contractor.",
+  },
+  {
+    term: "Pay",
+    text: "You are paid per lesson. Your per-lesson rate is shown on every offer you receive and in your teacher panel before you accept any lesson.",
+  },
+  {
+    term: "Payouts",
+    text: "Payouts run every 2 weeks via Wise. Payouts start only after your document set has been verified by our team.",
+  },
+  {
+    term: "Cancellations",
+    text: "If a school cancels a lesson less than 24 hours before its start time, you are paid 50% of your per-lesson rate for that lesson.",
+  },
+  {
+    term: "No-shows",
+    text: "Missing a confirmed lesson without notice is recorded as a no-show. Repeated no-shows may lead to suspension from the platform (3 strikes).",
+  },
+  {
+    term: "Confidentiality",
+    text: "Student and school data must not be shared with third parties.",
+  },
+  {
+    term: "Termination",
+    text: "Either party may end this agreement with 14 days written notice.",
+  },
+];
+const CONTRACT_FOOTNOTE =
+  "This is a pilot-period agreement; the final version is subject to legal review and will " +
+  "replace this text. By typing your name and confirming below you accept this agreement " +
+  "electronically.";
 
 function statusBadgeClass(status: DocumentStatus): string {
   return status === "submitted" || status === "verified" ? "badge ok" : "badge warn";
 }
+
+// Kart başlığı + tamamlandı rozeti aynı satırda (yalnız sunum).
+const SECTION_HEAD: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.55rem",
+  flexWrap: "wrap",
+  marginBottom: "0.7rem",
+};
 
 export default function EgitmenDavetPage() {
   const params = useParams<{ token: string }>();
@@ -176,10 +204,12 @@ export default function EgitmenDavetPage() {
       <main>
         <h1>Teacher invitation</h1>
         <div className="card">
-          <p className="error">This invitation link cannot be used.</p>
           <p className="muted">
-            The link may be invalid, expired, or revoked. Please ask the Teachernow team member
-            who invited you for a new link.
+            This invitation link cannot be used: it may be invalid, expired, or revoked. Please
+            ask the Teachernow team member who invited you for a new link.
+          </p>
+          <p>
+            <a href="/egitmen/link">Lost your link? Request a new one →</a>
           </p>
           {loadError ? <p className="muted">Details: {loadError}</p> : null}
         </div>
@@ -190,6 +220,9 @@ export default function EgitmenDavetPage() {
   const contract = data.documents.find((d) => d.kind === "contract");
   const contractDone =
     contract !== undefined && (contract.status === "submitted" || contract.status === "verified");
+  const stepIndex = STEPS.findIndex((s) => s.key === data.step);
+  const profileDone = stepIndex > 0;
+  const documentsDone = data.step === "review";
 
   return (
     <main>
@@ -200,13 +233,19 @@ export default function EgitmenDavetPage() {
       </p>
 
       <div className="card">
-        <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
-          {STEPS.map((s) => (
+        <div className="actions" style={{ gap: "0.5rem" }}>
+          {STEPS.map((s, i) => (
             <span
               key={s.key}
-              className={s.key === data.step ? "badge ok" : "badge"}
+              className={i < stepIndex ? "badge ok" : s.key === data.step ? "badge info" : "badge"}
+              style={
+                i > stepIndex
+                  ? { color: "var(--muted)", borderColor: "var(--hairline)" }
+                  : undefined
+              }
               aria-current={s.key === data.step ? "step" : undefined}
             >
+              {i < stepIndex ? "✓ " : ""}
               {s.label}
               {s.key === data.step ? " (current)" : ""}
             </span>
@@ -218,9 +257,12 @@ export default function EgitmenDavetPage() {
       {notice ? <p className="success">{notice}</p> : null}
 
       <div className="card">
-        <h2>1. Profile details</h2>
-        {data.step !== "profile" ? (
-          <p className="success">Profile step completed. You can still update your details.</p>
+        <div style={SECTION_HEAD}>
+          <h2 style={{ margin: 0 }}>1. Profile details</h2>
+          {profileDone ? <span className="badge ok">Completed</span> : null}
+        </div>
+        {profileDone ? (
+          <p className="muted">Profile step completed. You can still update your details.</p>
         ) : (
           <p className="muted">Fill in your phone number, country, and time zone, then save.</p>
         )}
@@ -286,31 +328,45 @@ export default function EgitmenDavetPage() {
       </div>
 
       <div className="card">
-        <h2>2. Agreement</h2>
-        {contractDone ? (
-          <p className="success">
-            Agreement accepted{" "}
+        <div style={SECTION_HEAD}>
+          <h2 style={{ margin: 0 }}>2. Agreement</h2>
+          {contractDone ? (
             <span className={statusBadgeClass(contract.status)}>
-              {DOC_STATUS_LABELS[contract.status]}
+              ✓ {DOC_STATUS_LABELS[contract.status]}
             </span>
+          ) : null}
+        </div>
+        {contractDone ? (
+          <p className="success" style={{ marginBottom: 0 }}>
+            Agreement accepted — nothing more to do in this step.
           </p>
         ) : data.step === "profile" ? (
-          <p className="muted">Please complete the profile step first.</p>
+          <p className="muted" style={{ marginBottom: 0 }}>
+            Please complete the profile step first.
+          </p>
         ) : (
           <>
-            <pre
+            <div
               style={{
-                whiteSpace: "pre-wrap",
-                maxHeight: "14rem",
+                maxHeight: "16rem",
                 overflowY: "auto",
-                border: "1px solid var(--muted)",
-                borderRadius: "6px",
-                padding: "0.75rem",
-                fontSize: "0.85rem",
+                border: "1px solid var(--hairline)",
+                borderRadius: "var(--r-md)",
+                padding: "1rem 1.2rem",
+                background: "rgba(255, 255, 255, 0.5)",
+                fontSize: "0.88rem",
               }}
             >
-              {CONTRACT_PLACEHOLDER}
-            </pre>
+              <p style={{ marginTop: 0, fontWeight: 650 }}>{CONTRACT_TITLE}</p>
+              <ol style={{ margin: 0, paddingLeft: "1.25rem" }}>
+                {CONTRACT_CLAUSES.map((c) => (
+                  <li key={c.term} style={{ marginBottom: "0.45rem" }}>
+                    <strong>{c.term}.</strong> {c.text}
+                  </li>
+                ))}
+              </ol>
+              <p className="muted" style={{ marginBottom: 0 }}>{CONTRACT_FOOTNOTE}</p>
+            </div>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -323,8 +379,17 @@ export default function EgitmenDavetPage() {
                   "Agreement accepted",
                 );
               }}
+              style={{
+                marginTop: "0.9rem",
+                padding: "0.9rem 1.1rem",
+                border: "1px solid rgba(10, 124, 255, 0.3)",
+                borderRadius: "var(--r-md)",
+                background: "var(--info-tint)",
+              }}
             >
-              <label htmlFor="ob-typed-name">I accept by typing my full name</label>
+              <label htmlFor="ob-typed-name" style={{ marginTop: 0 }}>
+                I accept this agreement — type your full name to sign
+              </label>
               <input
                 id="ob-typed-name"
                 value={typedName}
@@ -342,7 +407,10 @@ export default function EgitmenDavetPage() {
       </div>
 
       <div className="card">
-        <h2>3. Document declarations</h2>
+        <div style={SECTION_HEAD}>
+          <h2 style={{ margin: 0 }}>3. Document declarations</h2>
+          {documentsDone ? <span className="badge ok">Completed</span> : null}
+        </div>
         <p className="muted">
           For each document, declare that you have it ready ("I have uploaded / I declare"). Our
           team will review and verify your declarations. Payouts stay locked until verification
@@ -351,83 +419,92 @@ export default function EgitmenDavetPage() {
         {data.step === "profile" || (!contractDone && data.step === "contract") ? (
           <p className="muted">Please complete the profile and agreement steps first.</p>
         ) : null}
-        <table>
-          <thead>
-            <tr>
-              <th>Document</th>
-              <th>Status</th>
-              <th>Note (optional)</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {DECLARABLE_KINDS.map(({ kind, label, hint }) => {
-              const doc = data.documents.find((d) => d.kind === kind);
-              const status: DocumentStatus = doc?.status ?? "missing";
-              const declared = status === "submitted" || status === "verified";
-              return (
-                <tr key={kind}>
-                  <td>
-                    {label}
-                    <div className="muted" style={{ fontSize: "0.8rem" }}>
-                      {hint}
-                    </div>
-                  </td>
-                  <td>
-                    <span className={statusBadgeClass(status)}>{DOC_STATUS_LABELS[status]}</span>
-                  </td>
-                  <td>
-                    <input
-                      aria-label={`${label} note`}
-                      value={docNotes[kind] ?? ""}
-                      onChange={(e) => setDocNotes({ ...docNotes, [kind]: e.target.value })}
-                      placeholder="e.g. document reference"
-                    />
-                  </td>
-                  <td>
-                    <button
-                      className="secondary"
-                      style={{ marginTop: 0 }}
-                      disabled={busy || !contractDone}
-                      onClick={() => {
-                        const note = (docNotes[kind] ?? "").trim();
-                        void run(
-                          () =>
-                            trpc.teacherOnboarding.declareDocument.mutate({
-                              token,
-                              kind,
-                              ...(note ? { note } : {}),
-                            }),
-                          `${label}: declaration received`,
-                        );
-                      }}
-                    >
-                      {declared ? "Declare again" : "I have it / I declare"}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Document</th>
+                <th>Status</th>
+                <th>Note (optional)</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {DECLARABLE_KINDS.map(({ kind, label, hint }) => {
+                const doc = data.documents.find((d) => d.kind === kind);
+                const status: DocumentStatus = doc?.status ?? "missing";
+                const declared = status === "submitted" || status === "verified";
+                return (
+                  <tr key={kind}>
+                    <td>
+                      {label}
+                      <div className="muted" style={{ fontSize: "0.8rem" }}>
+                        {hint}
+                      </div>
+                    </td>
+                    <td>
+                      <span className={statusBadgeClass(status)}>{DOC_STATUS_LABELS[status]}</span>
+                    </td>
+                    <td>
+                      <input
+                        aria-label={`${label} note`}
+                        value={docNotes[kind] ?? ""}
+                        onChange={(e) => setDocNotes({ ...docNotes, [kind]: e.target.value })}
+                        placeholder="e.g. document reference"
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="secondary"
+                        style={{ marginTop: 0, padding: "0.3rem 0.75rem", fontSize: "0.8rem" }}
+                        disabled={busy || !contractDone}
+                        onClick={() => {
+                          const note = (docNotes[kind] ?? "").trim();
+                          void run(
+                            () =>
+                              trpc.teacherOnboarding.declareDocument.mutate({
+                                token,
+                                kind,
+                                ...(note ? { note } : {}),
+                              }),
+                            `${label}: declaration received`,
+                          );
+                        }}
+                      >
+                        {declared ? "Declare again" : "I have it / I declare"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="card">
-        <h2>Payout details (Wise)</h2>
+        <div style={SECTION_HEAD}>
+          <h2 style={{ margin: 0 }}>Payout details (Wise)</h2>
+          {data.payoutDetails ? (
+            <span className="badge ok">On file</span>
+          ) : (
+            <span className="badge warn">Not set</span>
+          )}
+        </div>
         <p className="muted">
           Optional — you can skip this step and add it later from your teacher panel. Add your
           payout details to receive payments.
         </p>
         {data.payoutDetails ? (
-          <p className="success">
-            Saved: {PAYOUT_METHOD_LABELS[data.payoutDetails.method]}{" "}
-            <span className="mono">{data.payoutDetails.maskedValue}</span> — account holder{" "}
-            {data.payoutDetails.accountHolder}. You can update it below.
+          <p>
+            <span className="badge info">{PAYOUT_METHOD_LABELS[data.payoutDetails.method]}</span>{" "}
+            <span className="mono">{data.payoutDetails.maskedValue}</span>{" "}
+            <span className="muted">
+              — account holder {data.payoutDetails.accountHolder}. You can update it below.
+            </span>
           </p>
         ) : (
-          <p className="muted">
-            <span className="badge warn">Not set</span> No payout details on file yet.
-          </p>
+          <p className="muted">No payout details on file yet.</p>
         )}
         <form
           onSubmit={(e) => {
@@ -491,8 +568,11 @@ export default function EgitmenDavetPage() {
 
       {data.step === "review" ? (
         <div className="card">
-          <h2>4. Review</h2>
-          <p className="success">
+          <div style={SECTION_HEAD}>
+            <h2 style={{ margin: 0 }}>4. Review</h2>
+            <span className="badge ok">All steps completed</span>
+          </div>
+          <p className="success" style={{ marginBottom: 0 }}>
             All steps completed. Our team will verify your declarations and contact you to
             schedule an interview. You can close this page.
           </p>
