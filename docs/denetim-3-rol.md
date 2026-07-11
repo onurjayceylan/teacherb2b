@@ -2,36 +2,40 @@
 
 Üç bağımsız denetçi, canlı sistemde kendi rolünün yolculuğunu uçtan uca YAŞAYARAK (kayıt, sihirbaz, havale, reçete, ders, settle, payout, iptal, itiraz — gerçek kayıtlarla) denetledi. Aşağıda önceliklendirilmiş sentez; üç raporun tam metni eklerde.
 
+> **DURUM (2026-07-11, denetim sonrası):** P0–P2 bulgularının TAMAMI üç turda kapatıldı ve CI'da yeşil:
+> **Tur A (P0)** `e681456` · **Tur B (P1)** `77cd51c` · **Tur C (P2)** `2f70436`.
+> Test: 108 → 158 yeşil. Aşağıda her kalemin yanında ✅ + tur işareti; kısmi kapananlarda kalan borç açıkça yazılı. P3 fikirleri bilinçli olarak backlog'da (bir kısmı Tur C ile kendiliğinden kapandı: müsaitlik self-servisi, reçete çoğaltma).
+
 ## HÜKÜM
 Para çekirdeği (ledger, hold, idempotency, payout hard-gate, kiracı izolasyonu, saat dilimi matematiği) üç denetçinin ortak kanaatiyle SAĞLAM ve vaadi taşıyacak kalitede. Ama sistem bugün pilota açılsa ilk hafta 5 yerde duvara çarpar. "Full otomatize" iddiası para/dispatch çekirdeğinde doğru; İLETİŞİM katmanında (kim kime neyi bildiriyor) ve self-servis yüzeylerinde değil.
 
 ## P0 — PİLOT BLOKERLERİ (birden fazla denetçi bağımsız doğruladı)
-1. **dispatch_ready bug'ı:** davet+görüşme yolundan gelen eğitmen HİÇBİR ZAMAN teklif alamıyor (yalnız toplu import açıyor; görüşme-kabul açmıyor; UI'da alan yok). Organik arz kanalı ölü doğuyor. [sahip B1 + eğitmen C1] → Fix: completeInterview(accept) dispatch_ready'yi açsın + admin toggle.
-2. **Worker görünmezliği:** worker hiç çalışmamışken healthz "ok" diyor; bloke slot açma, teklif timeout, backfill, SLA iadesi ve TÜM e-postalar sessizce birikiyor; kill-switch tetiklense kimseye haber gitmiyor. [sahip B2-B3 + okul B1/C4] → Fix: cron heartbeat'leri + healthz/probe FAIL + kritik alarm bildirimi.
-3. **Ders zaman-penceresi yok:** planlı saatten GÜNLER önce başlatılıp 2 dakikada bitirilen ders TAM ücret settle ediyor. [eğitmen D5 + okul B7 — ikisi de canlı üretti] → Fix: start penceresi + min-süre eşiği altında settle yerine insan kuyruğu.
-4. **Teklif/link iletim boşluğu:** e-posta anahtarı yokken teklif linkini gösteren HİÇBİR UI yok (tek yol psql); üç taraf da linki diğerinin ileteceğini sanıyor. [sahip B5 + eğitmen C4 + okul C3] → Fix: admin'de link görünür/kopyalanır + reissueOffer UI'a bağlanır.
-5. **Eğitmen yüzü tamamen Türkçe:** hedef arz Manila'daki native ESL eğitmeni — davet, sözleşme, teklif, panel, e-postalar Türkçe. [eğitmen B1] → Fix: eğitmen-yüzü İngilizce (i18n borcunun ilk gerçek faturası).
+1. ✅ **[Tur A] dispatch_ready bug'ı:** davet+görüşme yolundan gelen eğitmen HİÇBİR ZAMAN teklif alamıyor (yalnız toplu import açıyor; görüşme-kabul açmıyor; UI'da alan yok). Organik arz kanalı ölü doğuyor. [sahip B1 + eğitmen C1] → Fix: completeInterview(accept) dispatch_ready'yi açıyor + docs_pending→interview→active otomatik geçiş + /admin/egitmenler'de tıklanabilir toggle.
+2. ✅ **[Tur A] Worker görünmezliği:** worker hiç çalışmamışken healthz "ok" diyor; bloke slot açma, teklif timeout, backfill, SLA iadesi ve TÜM e-postalar sessizce birikiyor; kill-switch tetiklense kimseye haber gitmiyor. [sahip B2-B3 + okul B1/C4] → Fix: 8 cron'un hepsi worker_heartbeat basıyor; healthz workers+workersOk raporluyor; probe bayat worker'da exit 1; kill-switch'te outbox platform_alert (ALERT_EMAIL).
+3. ✅ **[Tur A] Ders zaman-penceresi yok:** planlı saatten GÜNLER önce başlatılıp 2 dakikada bitirilen ders TAM ücret settle ediyor. [eğitmen D5 + okul B7 — ikisi de canlı üretti] → Fix: start penceresi (−15dk/+2sa) + erken-start veya dozaj<%50 → para İŞLEMEDEN review_required kuyruğu; /admin'de Onayla(force)/Reddet.
+4. ✅ **[Tur A] Teklif/link iletim boşluğu:** e-posta anahtarı yokken teklif linkini gösteren HİÇBİR UI yok (tek yol psql); üç taraf da linki diğerinin ileteceğini sanıyor. [sahip B5 + eğitmen C4 + okul C3] → Fix: /admin "Bekleyen teklifler" kartı + reissueOffer → kopyalanabilir tam URL + son geçerlilik.
+5. ✅ **[Tur A] Eğitmen yüzü tamamen Türkçe:** hedef arz Manila'daki native ESL eğitmeni — davet, sözleşme, teklif, panel, e-postalar Türkçe. [eğitmen B1] → Fix: davet/teklif/panel/ders tamamen İngilizce + sözleşmeye 5 madde (ücret her teklifte, 2-haftalık Wise payout, <24sa okul iptali %50, 3-strike, pilot hükmü); tarihler eğitmen diliminde en-US; /sinif-dersi iki dilli.
 
 ## P1 — GÜVEN/PARA RİSKLERİ (pilot sırasında yakar)
-- Sözleşme "yer tutucu" + ücret/ödeme döngüsü/strike politikası tebliğ edilmiyor; eğitmen ücretini ilk kez ilk teklifte öğreniyor [eğitmen D1-D2, B6]
-- Wise hesap bilgisi sistemde tutulmuyor (payout_method serbest beyan; CSV'de yalnız ad+e-posta) [eğitmen D3]
-- Dış banka mutabakatı yok (plan borcu) + chargeback webhook'u işlenmiyor + kart clearing/rezerv penceresi payout'ta uygulanmıyor [sahip B4]
-- Okul iptali eğitmene, itiraz sonucu okula BİLDİRİLMİYOR; ders panelden sessizce kayboluyor [eğitmen B3 + okul B8]
-- Skip-week yarım: mevcut slotu iptal etmiyor; unutulursa ceza okula yazar [okul B4]
-- Yoklama okula görünmüyor — roster'ı isimle veren okul devam raporu alamıyor [okul B6]
-- Timezone alanı doğrulanmıyor (bozuk IANA → panel sessizce UTC'ye düşüyor) [eğitmen D7]
-- Test verileri (sahte banka hesapları, 9 platform_admin) prod'a taşınmamalı [okul B3 + sahip D6]
-- hr akışında ham 500'ler (docs_pending→active tuzağı; mükerrer email constraint sızıntısı) [sahip B7 + eğitmen C5]
+- ✅ **[Tur A]** Sözleşme "yer tutucu" + ücret/ödeme döngüsü/strike politikası tebliğ edilmiyor; eğitmen ücretini ilk kez ilk teklifte öğreniyor [eğitmen D1-D2, B6] → sözleşme metni P0 kapsamında yenilendi (5 madde).
+- ✅ **[Tur B]** Wise hesap bilgisi sistemde tutulmuyor (payout_method serbest beyan; CSV'de yalnız ad+e-posta) [eğitmen D3] → teacher.payout_details + davet/panel formu (maskeli görünüm) + CSV kolonları + eksik-detay uyarı listesi.
+- ✅ **[Tur B]** Dış banka mutabakatı yok (plan borcu) + chargeback webhook'u işlenmiyor [sahip B4] → charge.dispute.* ingest (idempotent, para hareketi yok, created/lost'ta platform_alert) + günlük external-reconciler (Stripe /v1/balance vs stripe_clearing; manuel Wise snapshot vs wise_clearing, farkta 24sa-dedupe alarm). **Kalan borç:** kart clearing/rezerv penceresi payout'ta hâlâ uygulanmıyor (bilinçli — pilot hacminde risk düşük, Faz-2).
+- ✅ **[Tur B]** Okul iptali eğitmene, itiraz sonucu okula BİLDİRİLMİYOR [eğitmen B3 + okul B8] → outbox kancaları: teacher_slot_cancelled (EN, lateCancel bilgili), school_dispute_resolved (TR), teacher_interview_scheduled (EN), school_topup_settled (TR) + dispatcher şablonları.
+- ✅ **[Tur B]** Skip-week yarım: mevcut slotu iptal etmiyor [okul B4] → >24sa slot otomatik ücretsiz iptal (hold tam iade); ≤24sa iptal etmez, %50 uyarısıyla bilinçli iptale yönlendirir.
+- ✅ **[Tur B]** Yoklama okula görünmüyor [okul B6] → slot detayında tam adlı yoklama (RLS okul-scoped) + sınıf devam raporu (oran + yoklama girilmemiş ders sayacı).
+- ✅ **[Tur B]** Timezone alanı doğrulanmıyor [eğitmen D7] → timezoneSchema (luxon IANAZone) davet/profil/müsaitlik girişlerinde.
+- ✅ **[Tur B]** Test verileri prod'a taşınmamalı [okul B3 + sahip D6] → docs/deploy.md §4 veri hijyeni: prod taze DB kuralı + staging önerisi; admin yönetimi SQL ile (bilinçli Faz-1 sınırı).
+- ✅ **[Tur A]** hr akışında ham 500'ler (docs_pending→active tuzağı; mükerrer email constraint sızıntısı) [sahip B7 + eğitmen C5] → geçiş otomatik zincirleniyor; 23505 dostane mesajla dönüyor.
 
 ## P2 — SELF-SERVİS / ÖLÇEK
-- Eğitmen self-servisi yok: müsaitlik, ders bırakma (teacherDrop hiçbir uca bağlı değil — strike sistemi fiilen çalıştırılamıyor), panel linki yenileme, strike görünürlüğü [eğitmen C2-C3, D4]
-- Reçete düzenleme/silme yok; saat değişikliği = tek tek iptal + yeni reçete [okul B5]
-- 250-sınıf ölçeği: toplu reçete/CSV yok; materializer tek-beklenmeyen-hata-tüm-gece kırılganlığı [sahip B6]
-- Havale: referans kodu sonradan bulunamıyor, bekleyen-havale listesi/durumu yok, TL hesaba USD tutar kur açıklaması yok [okul B2-B3]
-- /admin tek-bakış sağlık ekranı yok (bugünkü dersler, canlı dersler, bekleyen yaşları, failed payout rozeti) [sahip C]
-- Metrik boşlukları: funnel SÜRESİ ölçülmüyor (<15dk hedefi ölçülemiyor), repeat-topup oran değil adet, dosaj slot-bazlı (dakika değil) [sahip D2]
-- Ekstre indirilemez (PDF/CSV yok) ve satırlar ders-bazlı değil; sınıf katılım sayfası saati UTC gösteriyor [okul D5, D8-9]
-- Yoklamada herkes baştan "geldi" işaretli — dokunulmazsa tam katılım görünür [okul D10]
+- ✅ **[Tur C]** Eğitmen self-servisi yok [eğitmen C2-C3, D4] → panelde müsaitlik CRUD (IANA doğrulamalı), "Drop this lesson" (teacherDropByTeacher — yalnız KENDİ dersi, atomik doğrulama), "No-show strikes: N/3", /egitmen/link kayıp-link self-yenileme (varlık sızdırmaz, 15dk rate-limit).
+- ✅ **[Tur C]** Reçete düzenleme/silme yok [okul B5] → "Planı iptal et" (gelecek slotlar matrisle: ücretsiz/%50 özeti + plan cancelled) + "Başka sınıflara uygula" çoğaltma. **Kalan borç:** yerinde saat düzenleme yok — iptal + çoğaltma ikilisiyle çözülüyor (Faz-2).
+- ✅ **[Tur C]** 250-sınıf ölçeği [sahip B6] → çoğaltma ("N sınıfa uygula", sınıf başına sonuç/bloke ayrımı); materializer plan-başına hata izolasyonu (bozuk plan audit'e düşer, gece koşumu devam eder). **Kalan borç:** CSV'den toplu reçete yok (çoğaltma pilotu karşılıyor).
+- ✅ **[Tur C]** Havale görünürlüğü [okul B2-B3] → /okul'da bekleyen havaleler TN-referansıyla + "dekonta referansı yazın; TL gönderirseniz banka kuru uygulanır" notu.
+- ✅ **[Tur C]** /admin tek-bakış sağlık ekranı yok [sahip C] → healthStrip: bugünkü/canlı dersler, en eski bekleyen havale yaşı, failed payout, 9 worker heartbeat eşiği (bayat kırmızı), bekleyen bildirim.
+- ✅ **[Tur C]** Metrik boşlukları [sahip D2] → funnel geçiş SÜRE medyanları, repeat-topup ORANI (≥2 settled okul payı), dakika-bazlı dosaj gerçekleşme.
+- ✅ **[Tur C]** Ekstre indirilemez + satırlar ders-bazlı değil; sınıf katılım sayfası saati UTC [okul D5, D8-9] → BOM'lu CSV indirme + dostane satır açıklamaları ("Ders rezervi — 7B, 17 Tem 2026"); /sinif-dersi saatleri planın school_tz'sinde.
+- ✅ **[Tur C]** Yoklamada herkes baştan "geldi" işaretli [okul D10] → işaretsiz başlar + "Mark all present" + finish'te "N students unmarked" onayı (işaretsizler absent yazılır).
 
 ## P3 — DEĞERLİ YENİ FİKİRLER (denetçilerden)
 Sahibe günlük "sabah kahvesi" özet e-postası · eğitmen müsaitlik self-servisi · reçete şablonu/çoğaltma ("N sınıfa uygula") · seri teklif ("dönemin 12 dersini üstlen") · ICS takvim aboneliği · okul-yüzü eğitmen profili/vetting rozeti · "eğitmen değişimi talep et" · dekont fotoğrafı yükleme · okul sağlık skoru (churn erken uyarısı) · teklif e-postasına süre+ücret · kazanç özeti kutusu ("bu dönem X ders → Y USD, ödeme tarihi Z").
