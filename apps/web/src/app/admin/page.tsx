@@ -171,6 +171,8 @@ export default function AdminPage() {
         <a href="/admin/egitmenler">Eğitmen yönetimi (pipeline, davet, evrak, görüşme) →</a>
         {" · "}
         <a href="/admin/odemeler">Ödemeler (payout batch, Wise CSV, backfill) →</a>
+        {" · "}
+        <a href="/admin/metrikler">Pilot metrikleri (go/no-go) →</a>
       </p>
 
       {actionError ? <p className="error">{actionError}</p> : null}

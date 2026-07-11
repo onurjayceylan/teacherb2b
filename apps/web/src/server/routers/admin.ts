@@ -139,6 +139,141 @@ export const adminRouter = router({
       return { frozen: input.frozen };
     }),
 
+  // ---- Pilot go/no-go panosu (/admin/metrikler) ----
+  // Tek okuma turu, tamamı platform bağlamında. Yorumlama kuralları:
+  // - Aktivasyon medyanları yalnız ilgili olayı yaşamış okullar üzerinden hesaplanır.
+  // - Funnel sayıları audit_log'dan (action LIKE 'funnel_%'), okul bazında tekilleştirilmiş.
+  // - Dosaj penceresi ±28 gün: gerçekleşme (completed/escalated/no_show) doğası gereği
+  //   geçmişte; scheduled sayısı materialize ufkunu (gelecek ≤28 gün) da kapsar ki
+  //   pano "önümüzdeki ay ne planlı" sorusuna da cevap versin.
+  // - Backfill vaka raporu YÜZDE DEĞİL SAYI döner (plan kuralı) — audit tabanlı.
+  metrics: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform(async (db) => {
+      const schoolCount = Number(
+        (await db.query<{ n: string }>("SELECT count(*) AS n FROM school")).rows[0]?.n ?? 0,
+      );
+
+      // Kayıt→ilk settled top-up ve kayıt→ilk settled ders medyan gün.
+      // İlk settled ders zamanı audit 'session_settled' kaydından okunur
+      // (class_session'da settled_at kolonu yok; audit izi settle anında atılır).
+      const medians = await db.query<{ topup_days: number | null; lesson_days: number | null }>(
+        `WITH firsts AS (
+           SELECT s.id, s.created_at,
+                  (SELECT min(t.settled_at) FROM topup_attempt t
+                    WHERE t.school_id = s.id AND t.status = 'settled') AS first_topup,
+                  (SELECT min(a.occurred_at) FROM audit_log a
+                    WHERE a.school_id = s.id AND a.action = 'session_settled') AS first_lesson
+             FROM school s)
+         SELECT percentile_cont(0.5) WITHIN GROUP
+                  (ORDER BY EXTRACT(EPOCH FROM (first_topup - created_at)) / 86400.0)
+                  FILTER (WHERE first_topup IS NOT NULL) AS topup_days,
+                percentile_cont(0.5) WITHIN GROUP
+                  (ORDER BY EXTRACT(EPOCH FROM (first_lesson - created_at)) / 86400.0)
+                  FILTER (WHERE first_lesson IS NOT NULL) AS lesson_days
+           FROM firsts`,
+      );
+
+      const funnel = await db.query<{ action: string; schools: string; events: string }>(
+        `SELECT action, count(DISTINCT school_id) AS schools, count(*) AS events
+           FROM audit_log
+          WHERE action LIKE 'funnel_%'
+          GROUP BY action`,
+      );
+
+      const slots = await db.query<{ status: string; n: string }>(
+        `SELECT status, count(*) AS n
+           FROM booking_slot
+          WHERE starts_at >= now() - interval '28 days'
+            AND starts_at <  now() + interval '28 days'
+          GROUP BY status`,
+      );
+      const slotCounts: Record<string, number> = {};
+      for (const r of slots.rows) slotCounts[r.status] = Number(r.n);
+      const completed = slotCounts["completed"] ?? 0;
+      const escalated = slotCounts["escalated"] ?? 0;
+      const noShow = slotCounts["no_show_teacher"] ?? 0;
+      const realizationDenom = completed + escalated + noShow;
+
+      const backfill = await db.query<{ sla_escalated: string; reoffered: string }>(
+        `SELECT count(*) FILTER (WHERE action = 'sla_escalated') AS sla_escalated,
+                count(*) FILTER (WHERE action IN
+                  ('slot_backfill_reoffered', 'slot_teacher_drop_reoffered')) AS reoffered
+           FROM audit_log`,
+      );
+
+      const money = await db.query<{ settled_lessons: string; volume_cents: string }>(
+        `SELECT count(*) AS settled_lessons, COALESCE(sum(s.price_cents), 0) AS volume_cents
+           FROM class_session cs
+           JOIN booking_slot s ON s.id = cs.slot_id
+          WHERE cs.status = 'settled'`,
+      );
+      const settledLessons = Number(money.rows[0]?.settled_lessons ?? 0);
+
+      const disputeCount = Number(
+        (await db.query<{ n: string }>("SELECT count(*) AS n FROM session_dispute")).rows[0]?.n ??
+          0,
+      );
+
+      const repeatTopupSchools = Number(
+        (
+          await db.query<{ n: string }>(
+            `SELECT count(*) AS n FROM (
+               SELECT school_id FROM topup_attempt
+                WHERE status = 'settled' GROUP BY school_id HAVING count(*) >= 2) r`,
+          )
+        ).rows[0]?.n ?? 0,
+      );
+
+      const teachers = await db.query<{ active: string; payout_ready: string }>(
+        `SELECT count(*) FILTER (WHERE status = 'active') AS active,
+                count(*) FILTER (WHERE payout_ready) AS payout_ready
+           FROM teacher`,
+      );
+
+      const openPayouts = await db.query<{ n: string; total_cents: string }>(
+        `SELECT count(*) AS n, COALESCE(sum(amount_cents), 0) AS total_cents
+           FROM payout WHERE status IN ('pending', 'submitted')`,
+      );
+
+      return {
+        activation: {
+          schoolCount,
+          medianDaysToFirstTopup: medians.rows[0]?.topup_days ?? null,
+          medianDaysToFirstSettledLesson: medians.rows[0]?.lesson_days ?? null,
+          funnel: funnel.rows.map((r) => ({
+            action: r.action,
+            schools: Number(r.schools),
+            events: Number(r.events),
+          })),
+        },
+        dosage: {
+          windowDays: 28,
+          slotCounts,
+          // Gerçekleşme oranı: completed / (completed + escalated + no_show) — 0..1, veri yoksa null.
+          realizationRate: realizationDenom > 0 ? completed / realizationDenom : null,
+        },
+        backfill: {
+          slaEscalatedCount: Number(backfill.rows[0]?.sla_escalated ?? 0),
+          reofferCount: Number(backfill.rows[0]?.reoffered ?? 0),
+        },
+        money: {
+          settledLessonCount: settledLessons,
+          settledVolumeCents: Number(money.rows[0]?.volume_cents ?? 0),
+          disputeCount,
+          // İtiraz oranı: itiraz / settled ders — hedef < %2; settled ders yoksa null.
+          disputeRate: settledLessons > 0 ? disputeCount / settledLessons : null,
+          repeatTopupSchools,
+        },
+        teachers: {
+          activeCount: Number(teachers.rows[0]?.active ?? 0),
+          payoutReadyCount: Number(teachers.rows[0]?.payout_ready ?? 0),
+          openPayoutCount: Number(openPayouts.rows[0]?.n ?? 0),
+          openPayoutTotalCents: Number(openPayouts.rows[0]?.total_cents ?? 0),
+        },
+      };
+    });
+  }),
+
   // ---- Dispatch operasyonları (S3) ----
 
   listAvailability: platformProcedure

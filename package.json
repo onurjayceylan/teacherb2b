@@ -9,7 +9,8 @@
     "typecheck": "pnpm -r --parallel typecheck",
     "test": "pnpm -r test",
     "lint:boundaries": "dependency-cruiser --config .dependency-cruiser.cjs packages apps",
-    "lint:pii": "node tools/pii-linter.mjs"
+    "lint:pii": "node tools/pii-linter.mjs",
+    "probe": "node tools/synthetic-probe.mjs"
   },
   "devDependencies": {
     "dependency-cruiser": "^16.10.0",

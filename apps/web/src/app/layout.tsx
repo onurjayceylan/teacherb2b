@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               Teachernow
             </a>
             <a href="/okul">Okul</a>
-            <a href="/kayit">Okul Kaydı</a>
+            <a href="/baslangic">Başlangıç</a>
             <a href="/admin">Admin</a>
           </nav>
           {children}

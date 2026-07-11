@@ -59,3 +59,23 @@ ve doğru rol + `app.school_ids` GUC'u ile açılır.
 Migration dosyaları uygulandıktan sonra **değiştirilmez**; düzeltme yeni bir
 migration ile gelir. CI, migration'ları iki kez koşarak idempotenceyi ve
 `ledger_invariant_violations()` ile defter tutarlılığını doğrular.
+
+## Sentetik prob & Checkly
+
+`tools/synthetic-probe.mjs` oturum gerektirmeyen 4 uçtan uca kontrol koşar
+(Checkly'ye taşınacak; Node 22'nin yerleşik `fetch`'i dışında bağımlılığı yok):
+
+1. `GET /api/healthz` → 200 + `ok:true` + `db:"up"` — `paymentsFrozen:true` ise **exit 2**
+   (para donuk alarmı: ödeme yolu bilinçli kapatılmış, insan müdahalesi gerekli).
+2. `GET /` → 200 (giriş sayfası).
+3. `GET /okul` → 200 (uygulama kabuğu).
+4. `GET /api/trpc/me.get` → oturumsuz `UNAUTHORIZED` beklenir ("API ayakta" kanıtı);
+   5xx dönerse FAIL.
+
+```sh
+BASE_URL=http://localhost:3010 pnpm probe
+```
+
+Çıktı: adım başına `OK/FAIL` + toplam süre. Çıkış kodları: `0` hepsi yeşil,
+`1` en az bir adım FAIL, `2` paymentsFrozen alarmı. Checkly'de aynı dosya bir
+"multistep check" olarak birebir kopyalanabilir; alarm eşiği exit koduna bağlanır.

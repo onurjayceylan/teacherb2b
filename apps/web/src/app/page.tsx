@@ -28,7 +28,8 @@ export default function HomePage() {
         setError(result.error.message ?? "işlem başarısız");
         return;
       }
-      router.push("/okul");
+      // Yeni hesap → başlangıç sihirbazı (kayıt→ilk reçete <15 dk); mevcut hesap → panel.
+      router.push(mode === "signup" ? "/baslangic" : "/okul");
     } finally {
       setBusy(false);
     }
@@ -107,7 +108,7 @@ export default function HomePage() {
       </div>
 
       <p className="muted">
-        Girişten sonra okulunuz yoksa <a href="/kayit">okul kaydı</a> ile devam edin.
+        Girişten sonra okulunuz yoksa <a href="/baslangic">başlangıç sihirbazı</a> ile devam edin.
       </p>
     </main>
   );

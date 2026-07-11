@@ -57,28 +57,18 @@ export const scheduleRouter = router({
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      // 1) Fiyat kartı snapshot'ı — platform bağlamı (pay_per_lesson_cents okul rolüne kapalı).
-      const pricing = await ctx.pool.withPlatform(async (db) => {
-        const res = await db.query<{
-          sell_per_lesson_cents: string;
-          pay_per_lesson_cents: string;
-          lesson_minutes: number;
-          active: boolean;
-        }>(
-          `SELECT sell_per_lesson_cents, pay_per_lesson_cents, lesson_minutes, active
-             FROM pool WHERE id = $1`,
+      // Plan oluşturma SECURITY DEFINER RPC'de (0011): fiyat snapshot'ını DB alır —
+      // okul rolü maliyeti (teacher_pay_cents) ne okuyabilir ne yazabilir. Okul
+      // bağlamında çağrılır; RPC tenant kapısını app.school_ids ile kendisi doğrular.
+      const planId = await ctx.withSchoolDb(async (db) => {
+        // Nazik hata mesajları için ön kontroller (okul-granted kolonlarla):
+        const pool = await db.query<{ id: string }>(
+          "SELECT id FROM pool WHERE id = $1 AND active",
           [input.poolId],
         );
-        return res.rows[0] ?? null;
-      });
-      if (!pricing || !pricing.active) {
-        throw new TRPCError({ code: "NOT_FOUND", message: "havuz bulunamadı ya da aktif değil" });
-      }
-      const durationMin = input.durationMin ?? pricing.lesson_minutes;
-
-      // 2) Plan INSERT — okul bağlamı (RLS WITH CHECK school_id'yi doğrular; INSERT grant'i
-      // tam kolon setini kapsar, teacher_pay_cents parametre olarak geçirilir).
-      const planId = await ctx.withSchoolDb(async (db) => {
+        if (!pool.rows[0]) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "havuz bulunamadı ya da aktif değil" });
+        }
         const cg = await db.query<{ id: string }>(
           "SELECT id FROM class_group WHERE id = $1 AND active",
           [input.classGroupId],
@@ -86,37 +76,22 @@ export const scheduleRouter = router({
         if (!cg.rows[0]) {
           throw new TRPCError({ code: "NOT_FOUND", message: "sınıf bulunamadı" });
         }
-        const school = await db.query<{ timezone: string }>(
-          "SELECT timezone FROM school WHERE id = $1",
-          [ctx.activeSchoolId],
-        );
-        const schoolTz = school.rows[0]?.timezone;
-        if (!schoolTz) {
-          throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "okul saat dilimi okunamadı" });
-        }
         const ins = await db.query<{ id: string }>(
-          `INSERT INTO dosage_plan
-             (school_id, class_group_id, pool_id, weekday, start_minute, duration_min,
-              school_tz, price_cents, teacher_pay_cents, start_date, weeks, created_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-           RETURNING id`,
+          `SELECT create_dosage_plan($1, $2, $3, $4, $5, $6, $7, $8, $9) AS id`,
           [
             ctx.activeSchoolId,
             input.classGroupId,
             input.poolId,
             input.weekday,
             input.startMinute,
-            durationMin,
-            schoolTz,
-            pricing.sell_per_lesson_cents,
-            pricing.pay_per_lesson_cents,
+            input.durationMin ?? null,
             input.startDate,
             input.weeks,
             ctx.actor.userId,
           ],
         );
         const row = ins.rows[0];
-        if (!row) throw new Error("createPlan: INSERT satır dönmedi");
+        if (!row) throw new Error("createPlan: RPC satır dönmedi");
         return row.id;
       });
 

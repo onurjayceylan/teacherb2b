@@ -5,6 +5,7 @@ import { makePool } from "@teachernow/db";
 import { runBackfillSweep } from "./backfill-jobs.js";
 import { runDispatchMaterializer, runOfferTimeoutSweeper } from "./dispatch-jobs.js";
 import { runHrReminders } from "./hr-reminders.js";
+import { runLowBalanceCheck } from "./low-balance.js";
 import { runPayoutReconciler } from "./payout-reconciler.js";
 import { runInvariantSentinel } from "./sentinel.js";
 
@@ -14,6 +15,7 @@ const DISPATCH_MATERIALIZER_QUEUE = "dispatch-materializer";
 const OFFER_TIMEOUT_QUEUE = "offer-timeout-sweeper";
 const BACKFILL_SWEEPER_QUEUE = "backfill-sweeper";
 const PAYOUT_RECONCILER_QUEUE = "payout-reconciler";
+const LOW_BALANCE_QUEUE = "low-balance-check";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -85,6 +87,16 @@ async function main(): Promise<void> {
     const result = await runPayoutReconciler(pool);
     if (result.stuck.length > 0) {
       console.warn(`payout-reconciler: ${result.stuck.length} payout 'submitted'da takılı`);
+    }
+  });
+
+  // Her sabah 07:00'de: bakiyesi 7 günlük taahhüdün altındaki / bloke slotlu okullara uyarı
+  await boss.createQueue(LOW_BALANCE_QUEUE);
+  await boss.schedule(LOW_BALANCE_QUEUE, "0 7 * * *");
+  await boss.work(LOW_BALANCE_QUEUE, async () => {
+    const result = await runLowBalanceCheck(pool);
+    if (result.warned > 0) {
+      console.log(`low-balance-check: ${result.warned} okul için düşük bakiye uyarısı yazıldı`);
     }
   });
 
