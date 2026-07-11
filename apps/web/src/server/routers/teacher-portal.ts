@@ -156,13 +156,27 @@ export const teacherPortalRouter = router({
     });
   }),
 
-  // Panel linki üret (platform): ham token yalnız dönen URL'de yaşar (DB'de hash durur).
+  // Panel linki üret (platform): ham token yalnız dönen URL'de ve outbox payload'ında
+  // yaşar (DB'de hash durur). Panel e-postası AYNI transaction'da outbox'a düşer.
   createLink: platformProcedure
     .input(z.object({ teacherId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { token } = await ctx.pool.withPlatform(async (db) =>
-        createPortalToken(db, { teacherId: input.teacherId }),
-      );
+      const { token } = await ctx.pool.withPlatform(async (db) => {
+        const created = await createPortalToken(db, { teacherId: input.teacherId });
+        const teacher = await db.query<{ email: string; full_name: string }>(
+          "SELECT email, full_name FROM teacher WHERE id = $1",
+          [input.teacherId],
+        );
+        const row = teacher.rows[0];
+        if (!row) throw new TRPCError({ code: "NOT_FOUND", message: "eğitmen bulunamadı" });
+        await db.query(
+          `INSERT INTO notification_outbox (channel, recipient_email, template, payload)
+           VALUES ('email', $1, 'teacher_portal',
+                   jsonb_build_object('token', $2::text, 'fullName', $3::text))`,
+          [row.email, created.token, row.full_name],
+        );
+        return created;
+      });
       return { url: `${baseUrl()}/egitmen/panel/${token}` };
     }),
 

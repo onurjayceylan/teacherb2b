@@ -69,13 +69,31 @@ export const hrRouter = router({
       return { id };
     }),
 
-  // Onboarding davet linki: ham token yalnız dönen URL'de yaşar (DB'de hash durur).
+  // Onboarding davet linki: ham token yalnız dönen URL'de ve outbox payload'ında yaşar
+  // (DB'deki teacher_invite satırında hash durur). Davet e-postası AYNI transaction'da
+  // outbox'a düşer — dispatcher URL'i BASE_URL ile kurar.
   createInvite: platformProcedure
     .input(z.object({ teacherId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const { token } = await ctx.pool.withPlatform(async (db) =>
-        createInviteToken(db, { teacherId: input.teacherId, createdBy: ctx.actor.userId }),
-      );
+      const { token } = await ctx.pool.withPlatform(async (db) => {
+        const created = await createInviteToken(db, {
+          teacherId: input.teacherId,
+          createdBy: ctx.actor.userId,
+        });
+        const teacher = await db.query<{ email: string; full_name: string }>(
+          "SELECT email, full_name FROM teacher WHERE id = $1",
+          [input.teacherId],
+        );
+        const row = teacher.rows[0];
+        if (!row) throw new Error("createInvite: eğitmen bulunamadı");
+        await db.query(
+          `INSERT INTO notification_outbox (channel, recipient_email, template, payload)
+           VALUES ('email', $1, 'teacher_invite',
+                   jsonb_build_object('token', $2::text, 'fullName', $3::text))`,
+          [row.email, created.token, row.full_name],
+        );
+        return created;
+      });
       const base = (process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3010").replace(/\/+$/, "");
       return { url: `${base}/egitmen/davet/${token}` };
     }),

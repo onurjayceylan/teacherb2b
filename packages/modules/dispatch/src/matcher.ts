@@ -6,6 +6,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { ActorPool, Db } from "@teachernow/db";
 import { utcToZoneMinutes } from "./time.js";
+import { enqueueNotification } from "./notifications.js";
 import { getSlot, type SlotRow } from "./slots.js";
 
 export interface Candidate {
@@ -135,6 +136,9 @@ export async function offerNext(
          RETURNING id`,
         [slot.id, candidate.teacherId, slot.starts_at, slot.ends_at, sha256Hex(token), expiresAt],
       );
+      // Teklif e-postası AYNI transaction'da outbox'a düşer (0012 outbox deseni):
+      // teklif varsa kayıt da vardır. URL kurulmaz — dispatcher BASE_URL ile kurar.
+      await enqueueOfferNotification(db, slot, candidate, token);
       await db.query("RELEASE SAVEPOINT offer_try");
       return { assignmentId: res.rows[0]!.id, teacherId: candidate.teacherId, token };
     } catch (err) {
@@ -146,6 +150,37 @@ export async function offerNext(
     }
   }
   return null;
+}
+
+/** Teklif açılan eğitmene 'teacher_offer' outbox kaydı (offerNext transaction'ı içinde). */
+async function enqueueOfferNotification(
+  db: Db,
+  slot: SlotRow,
+  candidate: Candidate,
+  token: string,
+): Promise<void> {
+  const ctx = await db.query<{ email: string; pool_name: string; school_name: string }>(
+    `SELECT t.email, p.name AS pool_name, s.name AS school_name
+       FROM teacher t
+       JOIN pool p ON p.id = $2
+       JOIN school s ON s.id = $3
+      WHERE t.id = $1`,
+    [candidate.teacherId, slot.pool_id, slot.school_id],
+  );
+  const row = ctx.rows[0];
+  if (!row) throw new Error(`offerNext: eğitmen bulunamadı (teacher=${candidate.teacherId})`);
+  await enqueueNotification(db, {
+    recipientEmail: row.email,
+    template: "teacher_offer",
+    payload: {
+      token,
+      slotStartsAt: slot.starts_at.toISOString(),
+      durationMin: Math.round((slot.ends_at.getTime() - slot.starts_at.getTime()) / 60_000),
+      teacherTimezone: candidate.timezone,
+      poolName: row.pool_name,
+      schoolName: row.school_name,
+    },
+  });
 }
 
 export type AcceptOfferResult =

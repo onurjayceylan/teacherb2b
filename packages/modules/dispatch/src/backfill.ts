@@ -10,7 +10,8 @@ import type { ActorPool, Db } from "@teachernow/db";
 import { auditSlotAction } from "./ledger.js";
 import { releaseHold } from "./cancellations.js";
 import { offerNext } from "./matcher.js";
-import { getSlotForUpdate } from "./slots.js";
+import { enqueueNotification } from "./notifications.js";
+import { getSlotForUpdate, type SlotRow } from "./slots.js";
 
 const HOUR_MS = 60 * 60_000;
 
@@ -106,6 +107,8 @@ async function sweepSlot(
       prior_status: slot.status,
       release_txn_id: releaseTxnId,
     });
+    // Okulun owner/admin kullanıcıları AYNI transaction'da haberdar edilir (outbox).
+    await enqueueEscalationNotifications(db, slot, releaseTxnId ? Number(slot.price_cents) : 0);
     return "escalated";
   }
 
@@ -126,4 +129,39 @@ async function sweepSlot(
     return "reoffered";
   }
   return "offered";
+}
+
+/** Escalate edilen slotun okulundaki her owner/admin'e 'school_sla_escalated' kaydı. */
+async function enqueueEscalationNotifications(
+  db: Db,
+  slot: SlotRow,
+  refundedCents: number,
+): Promise<void> {
+  const ctx = await db.query<{ school_name: string; class_name: string }>(
+    `SELECT s.name AS school_name, cg.name AS class_name
+       FROM school s
+       JOIN class_group cg ON cg.id = $2
+      WHERE s.id = $1`,
+    [slot.school_id, slot.class_group_id],
+  );
+  const admins = await db.query<{ email: string }>(
+    `SELECT u.email
+       FROM school_user su
+       JOIN app_user u ON u.id = su.user_id
+      WHERE su.school_id = $1 AND su.role IN ('owner', 'admin')
+      ORDER BY u.email`,
+    [slot.school_id],
+  );
+  for (const admin of admins.rows) {
+    await enqueueNotification(db, {
+      recipientEmail: admin.email,
+      template: "school_sla_escalated",
+      payload: {
+        schoolName: ctx.rows[0]?.school_name ?? "",
+        slotStartsAt: slot.starts_at.toISOString(),
+        className: ctx.rows[0]?.class_name ?? "",
+        refundedCents,
+      },
+    });
+  }
 }

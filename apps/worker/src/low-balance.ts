@@ -1,8 +1,8 @@
 // Düşük bakiye uyarı taraması: her aktif okul için school_cash bakiyesi ile önümüzdeki
 // 7 günün 'scheduled' slot taahhüdü karşılaştırılır; bakiye < taahhüt ise audit_log'a
 // 'low_balance_warning' yazılır. Gelecekte başlayan 'blocked_insufficient_funds' slotu
-// olan okul da (dispatch orada zaten durdu) aynı uyarıyı alır. E-posta/pano bu kayda
-// bağlanacak — şimdilik kalıcı iz (kayıt = tek gerçek).
+// olan okul da (dispatch orada zaten durdu) aynı uyarıyı alır. Uyarıyla AYNI transaction'da
+// okulun owner/admin kullanıcılarına 'school_low_balance' outbox e-postası kuyruklanır.
 // Spam koruması (sentinel deseni): aynı okul için son 24 saatte kayıt varsa yenisi yazılmaz.
 import type { ActorPool } from "@teachernow/db";
 
@@ -12,7 +12,7 @@ export interface LowBalanceResult {
 
 export async function runLowBalanceCheck(pool: ActorPool): Promise<LowBalanceResult> {
   return pool.withPlatform(async (db) => {
-    const res = await db.query(
+    const res = await db.query<{ school_id: string; after: Record<string, unknown> }>(
       `WITH snapshot AS (
          SELECT s.id AS school_id,
                 COALESCE(cash.balance_cents, 0) AS balance_cents,
@@ -57,8 +57,24 @@ export async function runLowBalanceCheck(pool: ActorPool): Promise<LowBalanceRes
                 'balanceCents', due.balance_cents,
                 'committed7dCents', due.committed_cents
               )
-         FROM due`,
+         FROM due
+       RETURNING entity_id AS school_id, after`,
     );
+
+    // Uyarı alan her okulun owner/admin kullanıcılarına AYNI transaction'da outbox kaydı.
+    // 24 saat tekrar koruması yukarıdaki audit guard'ında — outbox ayrıca kontrol etmez.
+    for (const warned of res.rows) {
+      await db.query(
+        `INSERT INTO notification_outbox (channel, recipient_email, template, payload)
+         SELECT 'email', u.email, 'school_low_balance',
+                $2::jsonb || jsonb_build_object('schoolName', s.name)
+           FROM school s
+           JOIN school_user su ON su.school_id = s.id AND su.role IN ('owner', 'admin')
+           JOIN app_user u ON u.id = su.user_id
+          WHERE s.id = $1`,
+        [warned.school_id, JSON.stringify(warned.after)],
+      );
+    }
     return { warned: res.rowCount ?? 0 };
   });
 }

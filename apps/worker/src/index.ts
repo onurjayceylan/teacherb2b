@@ -6,6 +6,7 @@ import { runBackfillSweep } from "./backfill-jobs.js";
 import { runDispatchMaterializer, runOfferTimeoutSweeper } from "./dispatch-jobs.js";
 import { runHrReminders } from "./hr-reminders.js";
 import { runLowBalanceCheck } from "./low-balance.js";
+import { defaultResendSender, sendPendingNotifications } from "./notification-dispatcher.js";
 import { runPayoutReconciler } from "./payout-reconciler.js";
 import { runInvariantSentinel } from "./sentinel.js";
 
@@ -16,6 +17,7 @@ const OFFER_TIMEOUT_QUEUE = "offer-timeout-sweeper";
 const BACKFILL_SWEEPER_QUEUE = "backfill-sweeper";
 const PAYOUT_RECONCILER_QUEUE = "payout-reconciler";
 const LOW_BALANCE_QUEUE = "low-balance-check";
+const NOTIFICATION_DISPATCHER_QUEUE = "notification-dispatcher";
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -97,6 +99,22 @@ async function main(): Promise<void> {
     const result = await runLowBalanceCheck(pool);
     if (result.warned > 0) {
       console.log(`low-balance-check: ${result.warned} okul için düşük bakiye uyarısı yazıldı`);
+    }
+  });
+
+  // 2 dakikada bir: outbox'taki pending e-postaları gönder (RESEND_API_KEY yoksa biriktirir)
+  await boss.createQueue(NOTIFICATION_DISPATCHER_QUEUE);
+  await boss.schedule(NOTIFICATION_DISPATCHER_QUEUE, "*/2 * * * *");
+  await boss.work(NOTIFICATION_DISPATCHER_QUEUE, async () => {
+    const apiKey = process.env.RESEND_API_KEY;
+    const result = await sendPendingNotifications(
+      pool,
+      apiKey ? { sender: defaultResendSender(apiKey) } : {},
+    );
+    if (result.sent + result.failed + result.expired > 0) {
+      console.log(
+        `notification-dispatcher: sent=${result.sent} failed=${result.failed} expired=${result.expired}`,
+      );
     }
   });
 

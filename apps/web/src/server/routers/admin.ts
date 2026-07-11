@@ -8,6 +8,13 @@ import { isPaymentsFrozen, setPaymentsFrozen } from "@teachernow/ledger";
 import { resolveDispute } from "@teachernow/sessions";
 import { platformProcedure, router } from "../trpc";
 
+// Panoda tam adres gösterilmez: 'a***@dom.com' (log değil API yanıtı — pii-linter kapsamı dışı).
+function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  if (at <= 0) return "***";
+  return `${email[0]}***@${email.slice(at + 1)}`;
+}
+
 export const adminRouter = router({
   listPendingTopups: platformProcedure.query(async ({ ctx }) => {
     return ctx.pool.withPlatform(async (db) => {
@@ -454,6 +461,50 @@ export const adminRouter = router({
         return { ok: true as const, teacherId: next.teacherId, token: next.token };
       });
     }),
+
+  // ---- Bildirim outbox'ı ----
+
+  // Son 30 outbox kaydı. resendConfigured=false ise kayıtlar 'pending' birikiyordur —
+  // pano bunu 'e-posta anahtarı bekleniyor' notuyla gösterir.
+  listNotifications: platformProcedure.query(async ({ ctx }) => {
+    const rows = await ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{
+        id: string;
+        recipient_email: string;
+        template: string;
+        status: string;
+        attempt: number;
+        created_at: Date;
+      }>(
+        `SELECT id, recipient_email, template, status, attempt, created_at
+           FROM notification_outbox
+          ORDER BY created_at DESC
+          LIMIT 30`,
+      );
+      return res.rows;
+    });
+    return {
+      resendConfigured: Boolean(process.env.RESEND_API_KEY),
+      items: rows.map((r) => ({
+        id: r.id,
+        recipient: maskEmail(r.recipient_email),
+        template: r.template,
+        status: r.status,
+        attempt: r.attempt,
+        createdAt: r.created_at,
+      })),
+    };
+  }),
+
+  pendingNotificationCount: platformProcedure.query(async ({ ctx }) => {
+    const pending = await ctx.pool.withPlatform(async (db) => {
+      const res = await db.query<{ n: string }>(
+        "SELECT count(*) AS n FROM notification_outbox WHERE status = 'pending'",
+      );
+      return Number(res.rows[0]?.n ?? 0);
+    });
+    return { pending };
+  }),
 
   // ---- İtirazlar (S4) ----
 

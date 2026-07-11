@@ -80,6 +80,20 @@ interface Dispute {
   priceCents: number;
 }
 
+interface NotificationItem {
+  id: string;
+  recipient: string; // maskeli: a***@dom.com
+  template: string;
+  status: string;
+  attempt: number;
+  createdAt: Date;
+}
+
+interface NotificationsView {
+  resendConfigured: boolean;
+  items: NotificationItem[];
+}
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingTopup[]>([]);
   const [accounts, setAccounts] = useState<AdminBankAccount[]>([]);
@@ -96,21 +110,34 @@ export default function AdminPage() {
   const [poolPricing, setPoolPricing] = useState<PoolPricing[]>([]);
   const [pricing, setPricing] = useState(EMPTY_PRICING);
   const [disputes, setDisputes] = useState<Dispute[]>([]);
+  const [notifications, setNotifications] = useState<NotificationsView | null>(null);
+  const [pendingNotifications, setPendingNotifications] = useState(0);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [pendingRes, accountsRes, frozenRes, schoolsRes, teachersRes, poolsRes, disputesRes] =
-        await Promise.all([
-          trpc.admin.listPendingTopups.query(),
-          trpc.admin.listBankAccounts.query(),
-          trpc.admin.paymentsFrozen.query(),
-          trpc.lessons.listSchools.query(),
-          trpc.lessons.listActiveTeachers.query(),
-          trpc.admin.listPoolPricing.query(),
-          trpc.admin.listDisputes.query(),
-        ]);
+      const [
+        pendingRes,
+        accountsRes,
+        frozenRes,
+        schoolsRes,
+        teachersRes,
+        poolsRes,
+        disputesRes,
+        notificationsRes,
+        pendingNotifRes,
+      ] = await Promise.all([
+        trpc.admin.listPendingTopups.query(),
+        trpc.admin.listBankAccounts.query(),
+        trpc.admin.paymentsFrozen.query(),
+        trpc.lessons.listSchools.query(),
+        trpc.lessons.listActiveTeachers.query(),
+        trpc.admin.listPoolPricing.query(),
+        trpc.admin.listDisputes.query(),
+        trpc.admin.listNotifications.query(),
+        trpc.admin.pendingNotificationCount.query(),
+      ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
       setFrozen(frozenRes.frozen);
@@ -118,6 +145,8 @@ export default function AdminPage() {
       setTeachers(teachersRes);
       setPoolPricing(poolsRes);
       setDisputes(disputesRes);
+      setNotifications(notificationsRes);
+      setPendingNotifications(pendingNotifRes.pending);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -553,6 +582,55 @@ export default function AdminPage() {
                         </button>
                       </div>
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Bildirimler</h2>
+        <p>
+          Bekleyen e-posta: <strong>{pendingNotifications}</strong>
+        </p>
+        {notifications && !notifications.resendConfigured ? (
+          <p className="muted">
+            e-posta anahtarı bekleniyor (RESEND_API_KEY) — kayıtlar birikiyor, anahtar girilince
+            gönderilecek.
+          </p>
+        ) : null}
+        {!notifications || notifications.items.length === 0 ? (
+          <p className="muted">Henüz bildirim kaydı yok.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Şablon</th>
+                  <th>Alıcı</th>
+                  <th>Durum</th>
+                  <th>Deneme</th>
+                  <th>Tarih</th>
+                </tr>
+              </thead>
+              <tbody>
+                {notifications.items.map((n) => (
+                  <tr key={n.id}>
+                    <td className="mono">{n.template}</td>
+                    <td className="mono">{n.recipient}</td>
+                    <td>
+                      {n.status === "sent" ? (
+                        <span className="badge ok">sent</span>
+                      ) : n.status === "pending" ? (
+                        <span className="badge warn">pending</span>
+                      ) : (
+                        <span className="badge warn">{n.status}</span>
+                      )}
+                    </td>
+                    <td>{n.attempt}</td>
+                    <td>{new Date(n.createdAt).toLocaleString("tr-TR")}</td>
                   </tr>
                 ))}
               </tbody>
