@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { errorMessage, trpc } from "../../../lib/trpc";
+import { SUPPORT_EMAIL } from "../../../lib/support";
 
 interface ClassStatus {
   className: string;
@@ -17,6 +18,8 @@ interface ClassStatus {
   schoolTz: string;
   started: boolean;
   ended: boolean;
+  // P1-H: dersin yeri (okulun Zoom/Meet linki) — sınıf projeksiyonundan buraya tıklanır.
+  lessonLink: string | null;
 }
 
 /**
@@ -124,14 +127,38 @@ export default function SinifDersiPage() {
           <>
             <p style={{ ...LEAD, color: "var(--ok)" }}>Ders başladı!</p>
             <p style={{ ...LEAD_EN, color: "var(--ok)" }}>The lesson has started!</p>
-            <p className="muted" style={BODY_BIG}>
-              Eğitmeniniz sizi bekliyor. (Canlı ders bağlantısı yakında burada otomatik
-              açılacak.)
-            </p>
-            <p className="muted" style={{ ...BODY_BIG, marginBottom: 0 }}>
-              Your teacher is waiting for you. (The live lesson link will open here
-              automatically soon.)
-            </p>
+            {status.lessonLink ? (
+              <p style={{ margin: "1.1rem 0 0" }}>
+                <a
+                  href={status.lessonLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: "inline-block",
+                    fontWeight: 700,
+                    fontSize: "clamp(1.15rem, 3vw, 1.7rem)",
+                    padding: "0.85rem 2rem",
+                    borderRadius: "999px",
+                    color: "#fff",
+                    textDecoration: "none",
+                    background: "linear-gradient(180deg, var(--accent) 0%, var(--accent-deep) 100%)",
+                  }}
+                >
+                  Derse katıl / Join the video call →
+                </a>
+              </p>
+            ) : (
+              <>
+                <p className="muted" style={BODY_BIG}>
+                  Eğitmeniniz sizi bekliyor. (Canlı ders bağlantısı yakında burada otomatik
+                  açılacak.)
+                </p>
+                <p className="muted" style={{ ...BODY_BIG, marginBottom: 0 }}>
+                  Your teacher is waiting for you. (The live lesson link will open here
+                  automatically soon.)
+                </p>
+              </>
+            )}
           </>
         ) : (
           <>
@@ -161,6 +188,10 @@ export default function SinifDersiPage() {
           </>
         )}
       </div>
+
+      <p className="muted" style={BODY_BIG}>
+        Sorularınız için / Questions? Contact us: {SUPPORT_EMAIL}
+      </p>
     </main>
   );
 }

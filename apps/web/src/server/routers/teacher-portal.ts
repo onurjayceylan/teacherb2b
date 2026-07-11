@@ -136,8 +136,40 @@ export const teacherPortalRouter = router({
            JOIN school sch ON sch.id = s.school_id
           WHERE a.teacher_id = $1 AND a.status = 'confirmed'
             AND s.status = 'scheduled' AND s.ends_at > now()
+            -- P1-G: dersi verilmiş (ended/settled) slot 'Upcoming'de görünmesin — verilmiş
+            -- dersi 'Drop' etmek anlamsız; incelemedeki ders aşağıda ayrı bölümde.
+            AND NOT EXISTS (
+              SELECT 1 FROM class_session cs
+               WHERE cs.slot_id = s.id AND cs.status IN ('ended', 'settled')
+            )
           ORDER BY s.starts_at
           LIMIT 50`,
+        [teacher.teacherId],
+      );
+
+      // P1-G: incelemedeki dersler — eğitmen "param nerede" sorusunun cevabını panelde görür.
+      // status='ended' + review_required + henüz settle/void edilmemiş; reddedildiyse ayrı işaret.
+      const reviewLessons = await db.query<{
+        session_id: string;
+        ended_at: Date | null;
+        dosage_min: number | null;
+        teacher_pay_cents: string;
+        review_reason: string | null;
+        rejected: boolean;
+        class_name: string;
+        school_name: string;
+      }>(
+        `SELECT cs.id AS session_id, cs.ended_at, cs.dosage_min, s.teacher_pay_cents,
+                cs.review_reason, cs.review_rejected_at IS NOT NULL AS rejected,
+                cg.name AS class_name, sch.name AS school_name
+           FROM class_session cs
+           JOIN booking_slot s ON s.id = cs.slot_id
+           JOIN class_group cg ON cg.id = cs.class_group_id
+           JOIN school sch ON sch.id = cs.school_id
+          WHERE cs.teacher_id = $1 AND cs.status = 'ended' AND cs.review_required
+            AND s.status <> 'voided_review'
+          ORDER BY cs.ended_at DESC NULLS LAST
+          LIMIT 20`,
         [teacher.teacherId],
       );
 
@@ -233,6 +265,17 @@ export const teacherPortalRouter = router({
           endedAtLocal: r.ended_at ? formatInZone(r.ended_at, teacher.timezone) : "—",
           dosageMin: r.dosage_min ?? 0,
           earnedCents: Number(r.teacher_pay_cents),
+        })),
+        // P1-G: incelemedeki dersler (para henüz akmadı) — tutar + sebep + reddedildi mi.
+        reviewLessons: reviewLessons.rows.map((r) => ({
+          sessionId: r.session_id,
+          schoolName: r.school_name,
+          className: r.class_name,
+          endedAtLocal: r.ended_at ? formatInZone(r.ended_at, teacher.timezone) : "—",
+          dosageMin: r.dosage_min ?? 0,
+          pendingCents: Number(r.teacher_pay_cents),
+          reason: r.review_reason,
+          rejected: r.rejected,
         })),
         // Para ayarlamaları: amountCents NEGATİF (bakiyeden düşülen tutar).
         adjustments: adjustments.rows.map((r) => ({

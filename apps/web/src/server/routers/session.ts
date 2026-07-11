@@ -76,6 +76,7 @@ interface SlotSessionRow {
   class_group_id: string;
   class_name: string;
   school_tz: string | null;
+  lesson_link: string | null;
   teacher_name: string | null;
   teacher_tz: string | null;
   session_id: string | null;
@@ -88,7 +89,7 @@ async function loadSlotSession(db: Db, slotId: string): Promise<SlotSessionRow |
   const res = await db.query<SlotSessionRow>(
     `SELECT s.id AS slot_id, s.status AS slot_status, s.starts_at, s.ends_at,
             s.teacher_pay_cents, s.class_group_id, cg.name AS class_name,
-            dp.school_tz,
+            dp.school_tz, dp.lesson_link,
             t.full_name AS teacher_name, t.timezone AS teacher_tz,
             cs.id AS session_id, cs.status AS session_status, cs.dosage_min
        FROM booking_slot s
@@ -144,6 +145,8 @@ export const sessionRouter = router({
         dosageMin: row.dosage_min,
         // Eğitmenin ders ücreti — okul fiyatı (price_cents) BİLİNÇLİ olarak dönmez.
         teacherPayCents: Number(row.teacher_pay_cents),
+        // P1-H: dersin yeri (okulun Zoom/Meet linki) — eğitmen buradan katılır.
+        lessonLink: row.lesson_link,
         roster: students.rows.map((s) => ({
           studentId: s.id,
           // Eğitmene yalnız maskeli ad ("Ad S.") gider; tam ad okul yüzünde kalır.
@@ -267,6 +270,8 @@ export const sessionRouter = router({
           schoolTz: row.school_tz ?? "Europe/Istanbul",
           started: row.session_status === "started",
           ended: row.session_status === "ended" || row.session_status === "settled",
+          // P1-H: dersin yeri (okul projeksiyonuna da gösterilir — sınıf nereye bağlanacak).
+          lessonLink: row.lesson_link,
         };
       });
     }),

@@ -5,6 +5,7 @@
 // Fiyat yüzü: yalnız satış fiyatı görünür; eğitmen maliyeti sunucudan hiç gelmez.
 import { useCallback, useEffect, useState } from "react";
 import { errorMessage, formatCents, trpc } from "../../../lib/trpc";
+import { SUPPORT_EMAIL } from "../../../lib/support";
 
 interface PoolOption {
   id: string;
@@ -37,6 +38,8 @@ interface Plan {
   totalSlots: number;
   scheduledCount: number;
   blockedCount: number;
+  // P1-H: okulun Zoom/Meet linki — ders odası, eğitmen ve projeksiyon sayfası bunu gösterir.
+  lessonLink: string | null;
 }
 
 interface ApplyResult {
@@ -64,6 +67,9 @@ interface Slot {
   sessionStatus: string | null;
   dosageMin: number | null;
   settled: boolean;
+  // P1-F: itiraz durumu — okulda görünür olmalı; açık/sonuçlanmış itirazda düğme kilitlenir.
+  // Sunucu tipi geniş (string | null): null | 'open' | 'resolved_refund' | 'rejected'.
+  disputeStatus: string | null;
 }
 
 interface JoinLinks {
@@ -171,6 +177,9 @@ export default function ProgramPage() {
   const [joinLinks, setJoinLinks] = useState<Record<string, JoinLinks>>({});
   // Slot bazlı yoklama görünümü (okul kendi öğrencisini TAM ADLA görür — okul-scoped ekran).
   const [attendance, setAttendance] = useState<Record<string, SlotAttendance>>({});
+  // P1-H: plan bazlı ders bağlantısı düzenleme — açık form + taslak metin (plan id'ye göre).
+  const [editingLink, setEditingLink] = useState<Record<string, boolean>>({});
+  const [linkDrafts, setLinkDrafts] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setLoadError(null);
@@ -314,6 +323,23 @@ export default function ProgramPage() {
       await trpc.schedule.openDispute.mutate({ sessionId: slot.sessionId!, reason: reason.trim() });
       setNotice("İtirazınız alındı — platform ekibi inceleyip sonucu bildirecek.");
     }, null);
+  }
+
+  function openLinkEditor(plan: Plan) {
+    setLinkDrafts((prev) => ({ ...prev, [plan.id]: plan.lessonLink ?? "" }));
+    setEditingLink((prev) => ({ ...prev, [plan.id]: true }));
+  }
+
+  function cancelLinkEditor(planId: string) {
+    setEditingLink((prev) => ({ ...prev, [planId]: false }));
+  }
+
+  function saveLink(plan: Plan) {
+    const value = (linkDrafts[plan.id] ?? "").trim();
+    void run(async () => {
+      await trpc.schedule.setPlanLink.mutate({ planId: plan.id, lessonLink: value });
+      setEditingLink((prev) => ({ ...prev, [plan.id]: false }));
+    }, value ? "Ders bağlantısı kaydedildi." : "Ders bağlantısı kaldırıldı.");
   }
 
   function toggleApplyPanel(plan: Plan) {
@@ -522,6 +548,9 @@ export default function ProgramPage() {
                   <th>Hafta</th>
                   <th>Slot</th>
                   <th>Durum</th>
+                  <th title="Okulun Zoom/Meet linki — ders odası, eğitmen ve projeksiyon sayfası bunu gösterir.">
+                    Ders bağlantısı
+                  </th>
                   <th></th>
                 </tr>
               </thead>
@@ -552,6 +581,72 @@ export default function ProgramPage() {
                       <span className={`badge ${p.status === "active" ? "ok" : "warn"}`}>
                         {PLAN_STATUS_LABELS[p.status] ?? p.status}
                       </span>
+                    </td>
+                    <td style={{ minWidth: "13rem" }}>
+                      {editingLink[p.id] ? (
+                        <div>
+                          <input
+                            value={linkDrafts[p.id] ?? ""}
+                            onChange={(e) =>
+                              setLinkDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
+                            }
+                            placeholder="https://zoom.us/j/…"
+                            style={{ fontSize: "0.8rem" }}
+                          />
+                          <p className="muted" style={{ margin: "0.2rem 0 0.4rem", fontSize: "0.75rem" }}>
+                            Boş bırakıp kaydederseniz bağlantı silinir.
+                          </p>
+                          <div className="actions" style={{ marginTop: 0 }}>
+                            <button
+                              className="secondary"
+                              style={{ marginTop: 0, padding: "0.25rem 0.6rem", fontSize: "0.78rem" }}
+                              disabled={busy}
+                              onClick={() => saveLink(p)}
+                            >
+                              Kaydet
+                            </button>
+                            <button
+                              className="secondary"
+                              style={{ marginTop: 0, padding: "0.25rem 0.6rem", fontSize: "0.78rem" }}
+                              disabled={busy}
+                              onClick={() => cancelLinkEditor(p.id)}
+                            >
+                              Vazgeç
+                            </button>
+                          </div>
+                        </div>
+                      ) : p.lessonLink ? (
+                        <div>
+                          <a
+                            href={p.lessonLink}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="mono"
+                            style={{ fontSize: "0.78rem", wordBreak: "break-all" }}
+                          >
+                            {p.lessonLink}
+                          </a>
+                          <div>
+                            <button
+                              className="secondary"
+                              style={{ marginTop: "0.3rem", padding: "0.25rem 0.6rem", fontSize: "0.78rem" }}
+                              disabled={busy}
+                              onClick={() => openLinkEditor(p)}
+                            >
+                              Değiştir
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          className="secondary"
+                          style={{ marginTop: 0, padding: "0.25rem 0.6rem", fontSize: "0.78rem" }}
+                          disabled={busy}
+                          onClick={() => openLinkEditor(p)}
+                        >
+                          Ders bağlantısı ekle
+                        </button>
+                      )}
                     </td>
                     <td>
                       <div className="actions">
@@ -803,13 +898,31 @@ export default function ProgramPage() {
                               </button>
                             ) : null}
                             {s.sessionId && s.settled ? (
-                              <button
-                                className="secondary"
-                                disabled={busy}
-                                onClick={() => openDispute(s)}
-                              >
-                                İtiraz et
-                              </button>
+                              s.disputeStatus ? (
+                                <span
+                                  className={`badge ${
+                                    s.disputeStatus === "resolved_refund"
+                                      ? "ok"
+                                      : s.disputeStatus === "rejected"
+                                        ? "warn"
+                                        : "info"
+                                  }`}
+                                >
+                                  {s.disputeStatus === "open"
+                                    ? "İtiraz: incelemede"
+                                    : s.disputeStatus === "resolved_refund"
+                                      ? "İtiraz: iade edildi"
+                                      : "İtiraz: reddedildi"}
+                                </span>
+                              ) : (
+                                <button
+                                  className="secondary"
+                                  disabled={busy}
+                                  onClick={() => openDispute(s)}
+                                >
+                                  İtiraz et
+                                </button>
+                              )
                             ) : null}
                             {s.sessionId &&
                             (s.sessionStatus === "ended" || s.sessionStatus === "settled") ? (
@@ -868,6 +981,8 @@ export default function ProgramPage() {
           )}
         </div>
       ) : null}
+
+      <p className="muted">Sorularınız için: {SUPPORT_EMAIL}</p>
     </main>
   );
 }

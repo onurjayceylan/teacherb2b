@@ -170,12 +170,39 @@ export const adminRouter = router({
     return { frozen };
   }),
 
+  // P1-C (tur-2): manuel kill-switch iz bırakmıyordu. Artık SEBEP zorunlu; bayrak değişimi
+  // AYNI transaction'da audit_log'a yazılır ve DONDURMA'da platform_alert outbox'a düşer
+  // (sentinel-engage yolundaki alarmın manuel karşılığı — bir admin sessizce donduramaz).
   setPaymentsFrozen: platformProcedure
-    .input(z.object({ frozen: z.boolean(), detail: z.string().trim().max(500).optional() }))
+    .input(z.object({ frozen: z.boolean(), reason: z.string().trim().min(5).max(500) }))
     .mutation(async ({ ctx, input }) => {
-      await ctx.pool.withPlatform(async (db) =>
-        setPaymentsFrozen(db, input.frozen, input.detail),
-      );
+      await ctx.pool.withPlatform(async (db) => {
+        await setPaymentsFrozen(db, input.frozen, input.reason);
+        // entity_id UUID'dir; system_flag'in UUID'i yok → kolon boş bırakılır (sentinel'in
+        // kill_switch_engaged audit'i de aynı deseni kullanır). Anahtar 'after' payload'ında.
+        await db.query(
+          `INSERT INTO audit_log (actor_kind, actor_id, action, entity_type, after)
+           VALUES ('platform_admin', $1, $2, 'system_flag', $3::jsonb)`,
+          [
+            ctx.actor.userId,
+            input.frozen ? "payments_frozen_on" : "payments_frozen_off",
+            JSON.stringify({ flag: "payments_frozen", frozen: input.frozen, reason: input.reason }),
+          ],
+        );
+        if (input.frozen) {
+          await db.query(
+            `INSERT INTO notification_outbox (recipient_email, template, payload)
+             VALUES ($1, 'platform_alert', $2::jsonb)`,
+            [
+              process.env.ALERT_EMAIL ?? "alerts@yerel",
+              JSON.stringify({
+                checks: ["manual_kill_switch"],
+                detail: `Ödemeler admin tarafından MANUEL donduruldu. Sebep: ${input.reason}`,
+              }),
+            ],
+          );
+        }
+      });
       return { frozen: input.frozen };
     }),
 
@@ -203,6 +230,12 @@ export const adminRouter = router({
       );
       const failedPayouts = await db.query<{ n: string }>(
         "SELECT count(*) AS n FROM payout WHERE status = 'failed'",
+      );
+      // P2 (tur-2): 6 saatten uzun 'submitted' kalan payout Wise'da takılmış olabilir —
+      // healthStrip yalnız failed sayıyordu; stuck-submitted de rozetlenir.
+      const stuckPayouts = await db.query<{ n: string }>(
+        `SELECT count(*) AS n FROM payout
+          WHERE status = 'submitted' AND updated_at < now() - interval '6 hours'`,
       );
       const pendingNotifications = await db.query<{ n: string }>(
         "SELECT count(*) AS n FROM notification_outbox WHERE status = 'pending'",
@@ -235,6 +268,7 @@ export const adminRouter = router({
         liveLessonCount: Number(live.rows[0]?.n ?? 0),
         oldestPendingTopupDays: oldestAge === null || oldestAge === undefined ? null : Number(oldestAge),
         failedPayoutCount: Number(failedPayouts.rows[0]?.n ?? 0),
+        stuckPayoutCount: Number(stuckPayouts.rows[0]?.n ?? 0),
         pendingNotificationCount: Number(pendingNotifications.rows[0]?.n ?? 0),
         // E-posta teslim hattı durumu (P0-C): configured = RESEND anahtarı takılı mı;
         // pending + en eski bekleme süresi karoyu kırmızıya döndüren iki sinyaldir.

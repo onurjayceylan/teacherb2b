@@ -220,14 +220,44 @@ test("dispute refund: settle ters kayıtla geri sarılır, hold okula iade edili
 });
 
 test("dispute rejected: yalnız durum + not değişir, para oynamaz", async () => {
+  // P1-F: aynı derse ikinci itiraz açılamadığından TAZE bir settled oturum kurulur
+  // (sessionA zaten refund itirazı gördü). Kendi okul/plan/eğitmeniyle bağımsız.
+  const seedR = await seedSchool(tdb.pool, "Sessions Reject Okul");
+  const poolR = await seedPool(tdb.pool, "sessions_reject_pool");
+  const teacherR = await seedTeacher(tdb.pool, "sessions.reject.t@example.com");
+  const planR = await seedPlan(tdb.pool, seedR, poolR);
+  await topupSchool(tdb.pool, seedR.schoolId, 4_000);
+  const startsR = minutesFromNow(-120);
+  const slotR = await createHeldSlot(tdb.pool, {
+    seed: seedR,
+    planId: planR,
+    poolId: poolR,
+    occurrenceKey: "2026-02-05",
+    startsAt: startsR,
+    endsAt: new Date(startsR.getTime() + 45 * 60_000),
+    teacherId: teacherR,
+  });
+  const { sessionId: sessionR } = await tdb.pool.withPlatform((db) =>
+    ensureSessionForSlot(db, slotR),
+  );
+  await tdb.pool.withPlatform((db) => startSession(db, sessionR, { now: startsR }));
+  await tdb.pool.withPlatform((db) =>
+    endSession(db, sessionR, { now: new Date(startsR.getTime() + 45 * 60_000) }),
+  );
+  await settleSession(tdb.pool, sessionR);
+
   const disputeId = await tdb.pool.withPlatform((db) =>
-    openDispute(db, { sessionId: sessionA, schoolId: seed1.schoolId, reason: "ikinci itiraz" }),
+    openDispute(db, { sessionId: sessionR, schoolId: seedR.schoolId, reason: "geç geldi" }),
   );
   expect(
     await resolveDispute(tdb.pool, { disputeId, decision: "rejected", note: "kayıtlar temiz" }),
   ).toEqual({ status: "rejected" });
 
-  expect(await balance(tdb.pool, "school", seed1.schoolId, "school_cash")).toBe(4_000);
+  // settle hold'u tüketti (teacher_payable 1600 + platform_revenue 2400); reddedilen itiraz
+  // parayı OYNATMAZ — kasa 0, hold 0, eğitmen alacağı 1600 sabit kalır.
+  expect(await balance(tdb.pool, "school", seedR.schoolId, "school_cash")).toBe(0);
+  expect(await balance(tdb.pool, "school", seedR.schoolId, "wallet_hold")).toBe(0);
+  expect(await balance(tdb.pool, "teacher", teacherR, "teacher_payable")).toBe(1_600);
   const row = await tdb.pool.withPlatform((db) =>
     db.query<{ status: string; resolution_note: string | null }>(
       "SELECT status, resolution_note FROM session_dispute WHERE id = $1",
@@ -235,6 +265,13 @@ test("dispute rejected: yalnız durum + not değişir, para oynamaz", async () =
     ),
   );
   expect(row.rows[0]).toEqual({ status: "rejected", resolution_note: "kayıtlar temiz" });
+
+  // P1-F kilidi: aynı derse ikinci itiraz açılamaz
+  await expect(
+    tdb.pool.withPlatform((db) =>
+      openDispute(db, { sessionId: sessionR, schoolId: seedR.schoolId, reason: "tekrar" }),
+    ),
+  ).rejects.toThrow(/zaten bir itiraz var/);
 });
 
 test("hatalar: ended olmayan settle, settled olmayan dispute, atamasız/scheduled olmayan slot", async () => {

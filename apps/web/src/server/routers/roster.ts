@@ -67,6 +67,9 @@ export const rosterRouter = router({
           .max(1000),
       }),
     )
+    // P1-E (tur-2): aynı liste ikinci kez yapıştırılınca sessiz kopya oluşuyordu. Artık
+    // aktif roster'da AYNI ad+sınıf zaten varsa o satır ATLANIR ve uyarı listesine girer;
+    // ekleme yalnız gerçekten yeni satırlar için yapılır (dönem başı liste tazeleme güvenli).
     .mutation(async ({ ctx, input }) => {
       return ctx.withSchoolDb(async (db) => {
         const classIds = new Map<string, string>();
@@ -76,14 +79,44 @@ export const rosterRouter = router({
           }
         }
         let created = 0;
+        const skipped: { fullName: string; className: string }[] = [];
         for (const row of input.rows) {
+          const classGroupId = classIds.get(row.className)!;
+          const dup = await db.query(
+            `SELECT 1 FROM student
+              WHERE class_group_id = $1 AND full_name = $2 AND status = 'active'`,
+            [classGroupId, row.fullName],
+          );
+          if ((dup.rowCount ?? 0) > 0) {
+            skipped.push({ fullName: row.fullName, className: row.className });
+            continue;
+          }
           await db.query(
             "INSERT INTO student (school_id, class_group_id, full_name) VALUES ($1, $2, $3)",
-            [ctx.activeSchoolId, classIds.get(row.className), row.fullName],
+            [ctx.activeSchoolId, classGroupId, row.fullName],
           );
           created += 1;
         }
-        return { created, classGroups: classIds.size };
+        return { created, classGroups: classIds.size, skipped };
+      });
+    }),
+
+  // P1-E (tur-2): yanlış/ayrılan öğrenci roster'dan çıkarılabilmeli — aksi hâlde devam
+  // istatistiği kalıcı kirleniyordu. Soft-delete: status='removed' (yoklama/rapor sorguları
+  // yalnız active öğrenciyi sayar); geçmiş kayıtlar korunur.
+  archiveStudent: schoolProcedure
+    .input(z.object({ studentId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withSchoolDb(async (db) => {
+        const res = await db.query(
+          `UPDATE student SET status = 'removed', removed_at = now()
+            WHERE id = $1 AND status = 'active'`,
+          [input.studentId],
+        );
+        if (res.rowCount !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "öğrenci bulunamadı ya da zaten çıkarılmış" });
+        }
+        return { studentId: input.studentId };
       });
     }),
 

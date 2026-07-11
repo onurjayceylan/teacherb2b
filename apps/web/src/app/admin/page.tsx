@@ -152,6 +152,7 @@ interface HealthStrip {
   liveLessonCount: number;
   oldestPendingTopupDays: number | null;
   failedPayoutCount: number;
+  stuckPayoutCount: number;
   pendingNotificationCount: number;
   emailPipeline: EmailPipeline;
   workers: WorkerHealth[];
@@ -364,6 +365,11 @@ export default function AdminPage() {
                 label: "Başarısız payout",
                 value: String(health.failedPayoutCount),
                 alert: health.failedPayoutCount > 0,
+              },
+              {
+                label: "Takılı payout (6sa+)",
+                value: String(health.stuckPayoutCount),
+                alert: health.stuckPayoutCount > 0,
               },
               {
                 label: "Bekleyen bildirim",
@@ -844,15 +850,29 @@ export default function AdminPage() {
             <span className="badge ok">akış açık</span>
           )}
         </p>
+        <p className="muted">
+          Bu işlem denetim izi bırakır: sebep zorunludur, dondurmada platform alarm e-postası
+          (ALERT_EMAIL) tetiklenir. Bir yönetici parayı sessizce donduramaz.
+        </p>
         <button
           className={frozen ? undefined : "danger"}
           disabled={busy || frozen === null}
-          onClick={() =>
+          onClick={() => {
+            const reason = window.prompt(
+              frozen
+                ? "Ödeme akışını yeniden açma sebebi (en az 5 karakter):"
+                : "Ödemeleri DONDURMA sebebi (en az 5 karakter):",
+            );
+            if (reason === null) return; // iptal
+            if (reason.trim().length < 5) {
+              setActionError("Sebep en az 5 karakter olmalı.");
+              return;
+            }
             void run(
-              () => trpc.admin.setPaymentsFrozen.mutate({ frozen: !frozen }),
-              !frozen ? "Para akışı donduruldu" : "Para akışı yeniden açıldı",
-            )
-          }
+              () => trpc.admin.setPaymentsFrozen.mutate({ frozen: !frozen, reason: reason.trim() }),
+              !frozen ? "Para akışı donduruldu (alarm gönderildi)" : "Para akışı yeniden açıldı",
+            );
+          }}
         >
           {frozen ? "Akışı yeniden aç" : "Para akışını dondur"}
         </button>

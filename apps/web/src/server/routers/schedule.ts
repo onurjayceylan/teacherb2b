@@ -117,6 +117,7 @@ export const scheduleRouter = router({
         weeks: number;
         status: string;
         created_at: Date;
+        lesson_link: string | null;
         class_name: string | null;
         pool_name: string | null;
         total_slots: string;
@@ -126,6 +127,7 @@ export const scheduleRouter = router({
         `SELECT p.id, p.class_group_id, p.pool_id, p.weekday, p.start_minute, p.duration_min,
                 p.school_tz,
                 p.price_cents, p.start_date::text AS start_date, p.weeks, p.status, p.created_at,
+                p.lesson_link,
                 cg.name AS class_name, pl.name AS pool_name,
                 count(s.id) AS total_slots,
                 count(s.id) FILTER (WHERE s.status = 'scheduled') AS scheduled_count,
@@ -150,6 +152,7 @@ export const scheduleRouter = router({
         weeks: r.weeks,
         status: r.status,
         createdAt: r.created_at,
+        lessonLink: r.lesson_link,
         className: r.class_name ?? "—",
         poolName: r.pool_name ?? "—",
         totalSlots: Number(r.total_slots),
@@ -158,6 +161,30 @@ export const scheduleRouter = router({
       }));
     });
   }),
+
+  // P1-H (tur-2): dersin YERİ tanımsızdı. Okul buraya Zoom/Meet linkini girer; ders odası,
+  // eğitmen paneli ve projeksiyon sayfası bunu gösterir. Boş string → link kaldırılır (null).
+  setPlanLink: schoolProcedure
+    .input(z.object({ planId: z.string().uuid(), lessonLink: z.string().trim().max(500) }))
+    .mutation(async ({ ctx, input }) => {
+      return ctx.withSchoolDb(async (db) => {
+        const link = input.lessonLink.length === 0 ? null : input.lessonLink;
+        if (link && !/^https?:\/\//i.test(link)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "ders bağlantısı http(s):// ile başlamalı",
+          });
+        }
+        const res = await db.query(
+          "UPDATE dosage_plan SET lesson_link = $2, updated_at = now() WHERE id = $1",
+          [input.planId, link],
+        );
+        if (res.rowCount !== 1) {
+          throw new TRPCError({ code: "NOT_FOUND", message: "plan bulunamadı" });
+        }
+        return { planId: input.planId, lessonLink: link };
+      });
+    }),
 
   // Planı başka sınıflara uygula (denetim P2): kaynak planın parametre snapshot'ıyla
   // sınıf başına create_dosage_plan RPC (okul bağlamı — RLS + tenant kapısı), ardından
@@ -367,15 +394,21 @@ export const scheduleRouter = router({
           session_id: string | null;
           session_status: string | null;
           dosage_min: number | null;
+          dispute_status: string | null;
         }>(
           `SELECT s.id, s.plan_id, s.occurrence_key::text AS occurrence_key,
                   s.starts_at, s.ends_at, s.price_cents, s.status,
                   cg.name AS class_name, p.school_tz,
-                  cs.id AS session_id, cs.status AS session_status, cs.dosage_min
+                  cs.id AS session_id, cs.status AS session_status, cs.dosage_min,
+                  d.status AS dispute_status
              FROM booking_slot s
              JOIN dosage_plan p ON p.id = s.plan_id
              LEFT JOIN class_group cg ON cg.id = s.class_group_id
              LEFT JOIN class_session cs ON cs.slot_id = s.id
+             LEFT JOIN LATERAL (
+               SELECT status FROM session_dispute
+                WHERE session_id = cs.id ORDER BY created_at DESC LIMIT 1
+             ) d ON true
             WHERE ($1::uuid IS NULL OR s.plan_id = $1)
             ORDER BY s.starts_at`,
           [input?.planId ?? null],
@@ -421,6 +454,8 @@ export const scheduleRouter = router({
         sessionStatus: s.session_status,
         dosageMin: s.dosage_min,
         settled: s.session_status === "settled",
+        // P1-F: itiraz durumu okulda görünür olmalı; açık/sonuçlanmış itirazda düğme kilitlenir.
+        disputeStatus: s.dispute_status, // null | 'open' | 'resolved_refund' | 'rejected'
       }));
     }),
 

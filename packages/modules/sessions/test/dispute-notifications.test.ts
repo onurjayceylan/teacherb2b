@@ -25,16 +25,49 @@ import {
 
 let tdb: TestDb;
 let seed: SeedSchool;
+let poolId: string;
+let planId: string;
+let teacherId: string;
+// Paylaşılan ilk settled oturum (refund testi). P1-F kilidi nedeniyle her test KENDİ
+// oturumunu kullanır (aynı derse ikinci itiraz artık açılamaz).
 let slotStartsAt: Date;
 let sessionId: string;
+
+/** Hold'lu slot → ensure → start → end → settle: itiraz açmaya hazır settled oturum.
+ * minutesAgo AYRIK verilir; aynı eğitmenin iki dersi çakışırsa assignment_no_overlap patlar. */
+async function makeSettledSession(
+  occurrenceKey: string,
+  minutesAgo = 120,
+): Promise<{ sessionId: string; slotStartsAt: Date }> {
+  const startsAt = minutesFromNow(-minutesAgo);
+  const endsAt = new Date(startsAt.getTime() + 45 * 60_000);
+  const slotId = await createHeldSlot(tdb.pool, {
+    seed,
+    planId,
+    poolId,
+    occurrenceKey,
+    startsAt,
+    endsAt,
+    teacherId,
+  });
+  const ensured = await tdb.pool.withPlatform((db) => ensureSessionForSlot(db, slotId));
+  const sid = ensured.sessionId;
+  await tdb.pool.withPlatform((db) => startSession(db, sid, { now: startsAt }));
+  await tdb.pool.withPlatform((db) =>
+    endSession(db, sid, { now: new Date(startsAt.getTime() + 45 * 60_000) }),
+  );
+  const settled = await settleSession(tdb.pool, sid);
+  expect(settled.alreadySettled).toBe(false);
+  return { sessionId: sid, slotStartsAt: startsAt };
+}
 
 beforeAll(async () => {
   tdb = await createTestDb();
   seed = await seedSchool(tdb.pool, "Dispute Bildirim Okul");
-  const poolId = await seedPool(tdb.pool, "dispute_ntf_pool");
-  const teacherId = await seedTeacher(tdb.pool, "dispute.ntf.t@example.com");
-  const planId = await seedPlan(tdb.pool, seed, poolId);
-  await topupSchool(tdb.pool, seed.schoolId, 4_000);
+  poolId = await seedPool(tdb.pool, "dispute_ntf_pool");
+  teacherId = await seedTeacher(tdb.pool, "dispute.ntf.t@example.com");
+  planId = await seedPlan(tdb.pool, seed, poolId);
+  await topupSchool(tdb.pool, seed.schoolId, 8_000); // iki settled oturuma yeter
 
   // Okul üyeleri: owner + admin bildirim alır, finance almaz
   await tdb.pool.withPlatform(async (db) => {
@@ -55,26 +88,9 @@ beforeAll(async () => {
     }
   });
 
-  // Settled oturum zinciri: hold'lu slot + confirmed atama → ensure → start → end → settle
-  slotStartsAt = minutesFromNow(-120);
-  const endsAt = minutesFromNow(-60);
-  const slotId = await createHeldSlot(tdb.pool, {
-    seed,
-    planId,
-    poolId,
-    occurrenceKey: "2026-03-02",
-    startsAt: slotStartsAt,
-    endsAt,
-    teacherId,
-  });
-  const ensured = await tdb.pool.withPlatform((db) => ensureSessionForSlot(db, slotId));
-  sessionId = ensured.sessionId;
-  await tdb.pool.withPlatform((db) => startSession(db, sessionId, { now: slotStartsAt }));
-  await tdb.pool.withPlatform((db) =>
-    endSession(db, sessionId, { now: new Date(slotStartsAt.getTime() + 45 * 60_000) }),
-  );
-  const settled = await settleSession(tdb.pool, sessionId);
-  expect(settled.alreadySettled).toBe(false);
+  const first = await makeSettledSession("2026-03-02");
+  sessionId = first.sessionId;
+  slotStartsAt = first.slotStartsAt;
 });
 
 afterAll(async () => {
@@ -151,8 +167,11 @@ test("refund kararı: owner+admin'e outcome='refunded' + slot tarihi düşer; fi
 });
 
 test("rejected kararı: outcome='released' düşer (refundedCents payload'da yok)", async () => {
+  // P1-F: aynı derse ikinci itiraz açılamadığından bu test KENDİ settled oturumunu kullanır.
+  // Farklı zaman penceresi (aynı eğitmen çakışmasın — assignment_no_overlap).
+  const second = await makeSettledSession("2026-03-09", 300);
   const disputeId = await tdb.pool.withPlatform((db) =>
-    openDispute(db, { sessionId, schoolId: seed.schoolId, reason: "ikinci itiraz" }),
+    openDispute(db, { sessionId: second.sessionId, schoolId: seed.schoolId, reason: "geç geldi" }),
   );
   expect(
     await resolveDispute(tdb.pool, { disputeId, decision: "rejected", note: "kayıtlar temiz" }),
@@ -167,7 +186,7 @@ test("rejected kararı: outcome='released' düşer (refundedCents payload'da yok
   ]);
   for (const row of released) {
     expect(row.payload["outcome"]).toBe("released");
-    expect(row.payload["slotStartsAt"]).toBe(slotStartsAt.toISOString());
+    expect(row.payload["slotStartsAt"]).toBe(second.slotStartsAt.toISOString());
     expect(row.payload["refundedCents"]).toBeUndefined();
   }
 

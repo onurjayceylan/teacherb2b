@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { errorMessage, formatCents, trpc } from "../../../lib/trpc";
+import { SUPPORT_EMAIL } from "../../../lib/support";
 
 interface RosterEntry {
   studentId: string;
@@ -28,6 +29,8 @@ interface Room {
   durationMin: number;
   dosageMin: number | null;
   teacherPayCents: number;
+  // P1-H: dersin yeri (okulun Zoom/Meet linki) — eğitmen buradan derse girer.
+  lessonLink: string | null;
   roster: RosterEntry[];
 }
 
@@ -202,6 +205,22 @@ export default function DersPage() {
       <p className="muted">Hi {room.teacherName}.</p>
 
       <div className="card">
+        <p style={{ marginTop: 0 }}>
+          {room.lessonLink ? (
+            <a
+              href={room.lessonLink}
+              target="_blank"
+              rel="noreferrer"
+              style={{ fontWeight: 600, fontSize: "1.05rem" }}
+            >
+              Join the video call →
+            </a>
+          ) : (
+            <span className="muted">
+              No video link set by the school yet — contact support.
+            </span>
+          )}
+        </p>
         <div className="stat-grid">
           <div className="stat">
             <div className="k">Starts</div>
@@ -418,6 +437,8 @@ export default function DersPage() {
           )}
         </div>
       ) : null}
+
+      <p className="muted">Questions? Contact us: {SUPPORT_EMAIL}</p>
     </main>
   );
 }

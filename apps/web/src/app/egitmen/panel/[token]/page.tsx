@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { errorMessage, formatCents, trpc } from "../../../../lib/trpc";
+import { SUPPORT_EMAIL } from "../../../../lib/support";
 
 interface UpcomingLesson {
   slotId: string;
@@ -27,6 +28,18 @@ interface SettledLesson {
   endedAtLocal: string;
   dosageMin: number;
   earnedCents: number;
+}
+
+// P1-G: incelemedeki dersler — para henüz akmadı, kısa/erken ders manuel onay bekliyor.
+interface ReviewLesson {
+  sessionId: string;
+  schoolName: string;
+  className: string;
+  endedAtLocal: string;
+  dosageMin: number;
+  pendingCents: number;
+  reason: string | null;
+  rejected: boolean;
 }
 
 interface TeacherPayout {
@@ -76,6 +89,7 @@ interface Panel {
   payoutDetails: MaskedPayout | null;
   upcoming: UpcomingLesson[];
   settled: SettledLesson[];
+  reviewLessons: ReviewLesson[];
   adjustments: Adjustment[];
   payouts: TeacherPayout[];
 }
@@ -342,6 +356,48 @@ export default function EgitmenPanelPage() {
           </div>
         ) : null}
       </div>
+
+      {panel.reviewLessons.length > 0 ? (
+        <div className="card">
+          <h2>Under review</h2>
+          <p className="muted">
+            Lessons flagged for a quick manual review. Payment is on hold until our team confirms.
+          </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>School / class</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {panel.reviewLessons.map((l) => (
+                  <tr key={l.sessionId}>
+                    <td>{l.endedAtLocal}</td>
+                    <td>
+                      {l.schoolName} — {l.className}
+                    </td>
+                    <td>{formatCents(l.pendingCents)}</td>
+                    <td>
+                      {l.rejected ? (
+                        <>
+                          <span className="badge warn">Not paid — under review</span>
+                          {l.reason ? <span className="muted"> — {l.reason}</span> : null}
+                        </>
+                      ) : (
+                        <span className="badge info">Pending review</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
 
       <div className="card">
         <h2>Upcoming lessons</h2>
@@ -631,6 +687,8 @@ export default function EgitmenPanelPage() {
           </div>
         )}
       </div>
+
+      <p className="muted">Questions? Contact us: {SUPPORT_EMAIL}</p>
     </main>
   );
 }

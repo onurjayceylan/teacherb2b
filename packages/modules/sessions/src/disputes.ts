@@ -27,6 +27,19 @@ export async function openDispute(db: Db, input: OpenDisputeInput): Promise<stri
     throw new Error(`openDispute: oturum bu okula ait değil (session=${input.sessionId})`);
   }
 
+  // P1-F: aynı derse ikinci itiraz açılamaz. Açık itiraz sonuçlanmayı bekler; iade edilmiş
+  // itiraz zaten çözülmüştür (çifte iade idempotency ile de engelli ama UI'da düğme kilidi
+  // için yapısal red şart). Reddedilmiş itirazdan sonra yeniden açmaya da izin YOK (tek tur).
+  const existing = await db.query<{ status: string }>(
+    "SELECT status FROM session_dispute WHERE session_id = $1 ORDER BY created_at DESC LIMIT 1",
+    [input.sessionId],
+  );
+  if (existing.rows[0]) {
+    throw new Error(
+      `openDispute: bu ders için zaten bir itiraz var (${existing.rows[0].status}) — ikinci itiraz açılamaz`,
+    );
+  }
+
   const inserted = await db.query<{ id: string }>(
     `INSERT INTO session_dispute (session_id, school_id, reason, created_by)
      VALUES ($1, $2, $3, $4)
