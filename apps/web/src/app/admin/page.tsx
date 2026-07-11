@@ -56,6 +56,18 @@ const EMPTY_LESSON = {
   note: "",
 };
 
+interface PoolPricing {
+  id: string;
+  key: string;
+  name: string;
+  active: boolean;
+  sellPerLessonCents: number;
+  payPerLessonCents: number;
+  lessonMinutes: number;
+}
+
+const EMPTY_PRICING = { poolId: "", sellUsd: "", payUsd: "", minutes: "" };
+
 export default function AdminPage() {
   const [pending, setPending] = useState<PendingTopup[]>([]);
   const [accounts, setAccounts] = useState<AdminBankAccount[]>([]);
@@ -69,23 +81,28 @@ export default function AdminPage() {
   const [schools, setSchools] = useState<SchoolOption[]>([]);
   const [teachers, setTeachers] = useState<TeacherOption[]>([]);
   const [lesson, setLesson] = useState(EMPTY_LESSON);
+  const [poolPricing, setPoolPricing] = useState<PoolPricing[]>([]);
+  const [pricing, setPricing] = useState(EMPTY_PRICING);
 
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [pendingRes, accountsRes, frozenRes, schoolsRes, teachersRes] = await Promise.all([
-        trpc.admin.listPendingTopups.query(),
-        trpc.admin.listBankAccounts.query(),
-        trpc.admin.paymentsFrozen.query(),
-        trpc.lessons.listSchools.query(),
-        trpc.lessons.listActiveTeachers.query(),
-      ]);
+      const [pendingRes, accountsRes, frozenRes, schoolsRes, teachersRes, poolsRes] =
+        await Promise.all([
+          trpc.admin.listPendingTopups.query(),
+          trpc.admin.listBankAccounts.query(),
+          trpc.admin.paymentsFrozen.query(),
+          trpc.lessons.listSchools.query(),
+          trpc.lessons.listActiveTeachers.query(),
+          trpc.admin.listPoolPricing.query(),
+        ]);
       setPending(pendingRes);
       setAccounts(accountsRes);
       setFrozen(frozenRes.frozen);
       setSchools(schoolsRes);
       setTeachers(teachersRes);
+      setPoolPricing(poolsRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -292,6 +309,155 @@ export default function AdminPage() {
         >
           {frozen ? "Akışı yeniden aç" : "Para akışını dondur"}
         </button>
+      </div>
+
+      <div className="card">
+        <h2>Dispatch materializer</h2>
+        <p className="muted">
+          Aktif reçeteleri 4 haftalık ufukta slota döker (idempotent): hold alır ve eğitmen
+          tekliflerini başlatır. Normalde zamanlanmış iş; burası demo/test tetiğidir.
+        </p>
+        <button
+          disabled={busy}
+          onClick={() =>
+            void run(async () => {
+              const res = await trpc.admin.runMaterializer.mutate();
+              setNotice(
+                `Materializer bitti — ${res.created} slot oluştu, ${res.blocked} bloke (bakiye), ${res.skipped} zaten vardı`,
+              );
+            }, "Materializer bitti")
+          }
+        >
+          Materializer&apos;ı çalıştır
+        </button>
+      </div>
+
+      <div className="card">
+        <h2>Pool fiyat kartı</h2>
+        <p className="muted">
+          Değişiklik yalnız YENİ reçeteleri etkiler; mevcut planlar oluşturulma anındaki fiyat
+          snapshot&apos;ını taşır.
+        </p>
+        {poolPricing.length === 0 ? (
+          <p className="muted">Tanımlı havuz yok.</p>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Havuz</th>
+                <th>Satış / ders</th>
+                <th>Eğitmen maliyeti / ders</th>
+                <th>Süre</th>
+              </tr>
+            </thead>
+            <tbody>
+              {poolPricing.map((p) => (
+                <tr key={p.id}>
+                  <td>
+                    {p.name} {p.active ? null : <span className="badge warn">pasif</span>}
+                  </td>
+                  <td>{formatCents(p.sellPerLessonCents)}</td>
+                  <td>{formatCents(p.payPerLessonCents)}</td>
+                  <td>{p.lessonMinutes} dk</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const sellCents = parseUsdCents(pricing.sellUsd);
+            const payCents = parseUsdCents(pricing.payUsd);
+            const minutes = Number(pricing.minutes);
+            if (!pricing.poolId) {
+              setActionError("Havuz seçin");
+              return;
+            }
+            if (!sellCents || sellCents <= 0 || payCents === null) {
+              setActionError("Geçerli tutarlar girin");
+              return;
+            }
+            if (!Number.isInteger(minutes) || minutes < 15 || minutes > 240) {
+              setActionError("Ders süresi 15-240 dk arasında olmalı");
+              return;
+            }
+            void run(async () => {
+              await trpc.admin.updatePoolPricing.mutate({
+                poolId: pricing.poolId,
+                sellPerLessonCents: sellCents,
+                payPerLessonCents: payCents,
+                lessonMinutes: minutes,
+              });
+              setPricing(EMPTY_PRICING);
+            }, "Fiyat kartı güncellendi — yeni reçetelerde geçerli");
+          }}
+        >
+          <div className="row">
+            <div>
+              <label htmlFor="pp-pool">Havuz</label>
+              <select
+                id="pp-pool"
+                value={pricing.poolId}
+                onChange={(e) => {
+                  const pool = poolPricing.find((p) => p.id === e.target.value);
+                  setPricing(
+                    pool
+                      ? {
+                          poolId: pool.id,
+                          sellUsd: (pool.sellPerLessonCents / 100).toFixed(2),
+                          payUsd: (pool.payPerLessonCents / 100).toFixed(2),
+                          minutes: String(pool.lessonMinutes),
+                        }
+                      : EMPTY_PRICING,
+                  );
+                }}
+                required
+              >
+                <option value="">Seçin…</option>
+                {poolPricing.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="pp-sell">Satış (USD / ders)</label>
+              <input
+                id="pp-sell"
+                inputMode="decimal"
+                value={pricing.sellUsd}
+                onChange={(e) => setPricing({ ...pricing, sellUsd: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="pp-pay">Eğitmen maliyeti (USD / ders)</label>
+              <input
+                id="pp-pay"
+                inputMode="decimal"
+                value={pricing.payUsd}
+                onChange={(e) => setPricing({ ...pricing, payUsd: e.target.value })}
+                required
+              />
+            </div>
+            <div>
+              <label htmlFor="pp-min">Süre (dk)</label>
+              <input
+                id="pp-min"
+                inputMode="numeric"
+                value={pricing.minutes}
+                onChange={(e) => setPricing({ ...pricing, minutes: e.target.value })}
+                required
+              />
+            </div>
+          </div>
+          <button type="submit" disabled={busy || !pricing.poolId}>
+            Fiyatı güncelle
+          </button>
+        </form>
       </div>
 
       <div className="card">

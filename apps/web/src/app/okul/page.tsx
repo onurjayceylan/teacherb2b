@@ -171,6 +171,8 @@ export default function OkulPage() {
       <h1>{school.name}</h1>
       <p className="muted">
         <a href="/okul/siniflar">Sınıflar ve öğrenciler (roster) →</a>
+        {" · "}
+        <a href="/okul/program">Ders programı (reçeteler ve slotlar) →</a>
       </p>
       {me.schools.length > 1 ? (
         <p>

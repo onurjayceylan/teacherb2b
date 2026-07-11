@@ -22,7 +22,7 @@ beforeAll(async () => {
       [org.rows[0]!.id],
     );
     const pool = await db.query<{ id: string }>(
-      "INSERT INTO pool (key, name) VALUES ('worker_pool', 'Worker Pool') RETURNING id",
+      "INSERT INTO pool (key, name, sell_per_lesson_cents, pay_per_lesson_cents) VALUES ('worker_pool', 'Worker Pool', 4000, 1600) RETURNING id",
     );
     return { schoolId: school.rows[0]!.id, poolId: pool.rows[0]!.id };
   });

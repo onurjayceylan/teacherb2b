@@ -38,7 +38,7 @@ export async function seedSchool(pool: ActorPool, name: string): Promise<SeedSch
 export async function seedPool(pool: ActorPool, key: string): Promise<string> {
   return pool.withPlatform(async (db) => {
     const res = await db.query<{ id: string }>(
-      "INSERT INTO pool (key, name) VALUES ($1, $1) RETURNING id",
+      "INSERT INTO pool (key, name, sell_per_lesson_cents, pay_per_lesson_cents) VALUES ($1, $1, 4000, 1600) RETURNING id",
       [key],
     );
     return res.rows[0]!.id;

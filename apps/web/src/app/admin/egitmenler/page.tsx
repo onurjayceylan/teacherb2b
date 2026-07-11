@@ -54,6 +54,29 @@ interface Pool {
   name: string;
 }
 
+interface AvailabilityWindow {
+  id: string;
+  weekday: number;
+  startMinute: number;
+  endMinute: number;
+  timezone: string;
+}
+
+const WEEKDAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"];
+
+function minuteToHHMM(minute: number): string {
+  return `${String(Math.floor(minute / 60)).padStart(2, "0")}:${String(minute % 60).padStart(2, "0")}`;
+}
+
+function hhmmToMinute(value: string): number | null {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+  const minute = Number(m[1]) * 60 + Number(m[2]);
+  return minute >= 0 && minute <= 1440 ? minute : null;
+}
+
+const EMPTY_AVAIL = { weekday: "0", start: "09:00", end: "18:00", timezone: "Europe/Istanbul" };
+
 const SOURCE_LABELS: Record<TeacherSource, string> = {
   site: "Site",
   ilan: "İlan",
@@ -175,6 +198,10 @@ export default function EgitmenlerPage() {
   const [ivPoolId, setIvPoolId] = useState("");
   const [ivNotes, setIvNotes] = useState("");
 
+  const [availTeacherId, setAvailTeacherId] = useState("");
+  const [availability, setAvailability] = useState<AvailabilityWindow[]>([]);
+  const [availForm, setAvailForm] = useState(EMPTY_AVAIL);
+
   const load = useCallback(async () => {
     setLoadError(null);
     try {
@@ -198,6 +225,22 @@ export default function EgitmenlerPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadAvailability = useCallback(async (teacherId: string) => {
+    if (!teacherId) {
+      setAvailability([]);
+      return;
+    }
+    try {
+      setAvailability(await trpc.admin.listAvailability.query({ teacherId }));
+    } catch (err) {
+      setActionError(errorMessage(err));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAvailability(availTeacherId);
+  }, [availTeacherId, loadAvailability]);
 
   async function run(action: () => Promise<unknown>, successMsg: string) {
     setBusy(true);
@@ -745,6 +788,152 @@ export default function EgitmenlerPage() {
               Sonuçlandır
             </button>
           </form>
+        )}
+      </div>
+
+      <div className="card">
+        <h2>Müsaitlik (dispatch)</h2>
+        <p className="muted">
+          Eğitmen yalnız penceresi slotu TAM kapsıyorsa aday olur; pencere kendi saat dilimini
+          taşır. 0=Pazartesi.
+        </p>
+        <div className="row">
+          <div>
+            <label htmlFor="av-teacher">Eğitmen</label>
+            <select
+              id="av-teacher"
+              value={availTeacherId}
+              onChange={(e) => setAvailTeacherId(e.target.value)}
+            >
+              <option value="">Seçin…</option>
+              {teachers.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.fullName} ({STATUS_LABELS[t.status]})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {availTeacherId ? (
+          <>
+            {availability.length === 0 ? (
+              <p className="muted">Bu eğitmenin aktif müsaitlik penceresi yok.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Gün</th>
+                    <th>Aralık</th>
+                    <th>Saat dilimi</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {availability.map((w) => (
+                    <tr key={w.id}>
+                      <td>{WEEKDAYS[w.weekday]}</td>
+                      <td className="mono">
+                        {minuteToHHMM(w.startMinute)}–{minuteToHHMM(w.endMinute)}
+                      </td>
+                      <td>{w.timezone}</td>
+                      <td>
+                        <button
+                          className="secondary"
+                          style={{ marginTop: 0 }}
+                          disabled={busy}
+                          onClick={() =>
+                            void run(async () => {
+                              await trpc.admin.removeAvailability.mutate({ id: w.id });
+                              await loadAvailability(availTeacherId);
+                            }, "Müsaitlik penceresi kaldırıldı")
+                          }
+                        >
+                          Kaldır
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const startMinute = hhmmToMinute(availForm.start);
+                const endMinute = hhmmToMinute(availForm.end);
+                if (startMinute === null || endMinute === null || endMinute <= startMinute) {
+                  setActionError("Geçerli bir saat aralığı girin (bitiş başlangıçtan sonra)");
+                  return;
+                }
+                void run(async () => {
+                  await trpc.admin.addAvailability.mutate({
+                    teacherId: availTeacherId,
+                    weekday: Number(availForm.weekday),
+                    startMinute,
+                    endMinute,
+                    timezone: availForm.timezone.trim(),
+                  });
+                  await loadAvailability(availTeacherId);
+                }, "Müsaitlik penceresi eklendi");
+              }}
+            >
+              <div className="row">
+                <div>
+                  <label htmlFor="av-weekday">Gün</label>
+                  <select
+                    id="av-weekday"
+                    value={availForm.weekday}
+                    onChange={(e) => setAvailForm({ ...availForm, weekday: e.target.value })}
+                  >
+                    {WEEKDAYS.map((d, i) => (
+                      <option key={d} value={String(i)}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="av-start">Başlangıç</label>
+                  <input
+                    id="av-start"
+                    type="time"
+                    value={availForm.start}
+                    onChange={(e) => setAvailForm({ ...availForm, start: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="av-end">Bitiş</label>
+                  <input
+                    id="av-end"
+                    type="time"
+                    value={availForm.end}
+                    onChange={(e) => setAvailForm({ ...availForm, end: e.target.value })}
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="av-tz">Saat dilimi</label>
+                  <input
+                    id="av-tz"
+                    value={availForm.timezone}
+                    onChange={(e) => setAvailForm({ ...availForm, timezone: e.target.value })}
+                    placeholder="Europe/Istanbul"
+                    required
+                  />
+                </div>
+                <div>
+                  <button type="submit" disabled={busy}>
+                    Pencere ekle
+                  </button>
+                </div>
+              </div>
+            </form>
+          </>
+        ) : (
+          <p className="muted">Müsaitlik pencerelerini görmek için eğitmen seçin.</p>
         )}
       </div>
 
