@@ -441,3 +441,17 @@ Yeni açık-tema cam tasarım masaüstünde temiz, ferah ve hiyerarşisi net: st
 ---
 
 **GÜVEN MUHASEBESİ — "Emeğimi emanet eder miyim?":** Para çekirdeği ve kural netliği bu turda beni ikna etti: ücretim her adımda net ve tek yönlü gizli, zaman-penceresi & kısa-ders koruması para güvenimi sağlıyor (2 dk'lık derste para işlemedi, review'a düştü), sözleşme 5 maddeyle ne kabul ettiğimi söylüyor, Wise/IBAN maskeli tutuluyor, strike'ım görünür, müsaitlik/bırakma/kayıp-link kendi elimde. **Ama iki şey beni tereddütte bırakıyor:** (a) daveti, HER teklifi ve panel linkimi Türkçe alacağım — profili dolduramadan kaybolabilecek bir arz için bu gerçek bir bloker; (b) teklif e-postasında ücret/süre olmadan ve panelde incelemedeki dersimin izi olmadan, "param nerede" sorusuna e-posta katmanı hâlâ cevap veremiyor. **Hüküm: Ürün çekirdeği emanete değer; pilotu açmadan önce B1–B3 (eğitmen e-postalarının İngilizcesi + teklif e-postasına ücret/süre) kapatılmalı.**
+
+---
+
+# KAPANIŞ — Tur G (2026-07-12): Denetim-2 UX top-3
+
+Denetimin P0/P1'leri Tur D/E/F'te kapandıktan sonra kalan **"bloke etmez" UI/UX katmanının en kötü 3 noktası** (üç raportörün de G bölümlerinde ortak işaret ettiği) bu turda kapatıldı. Kod-only, para/dispatch çekirdeğine dokunulmadı; typecheck 10/10, 171 test, boundaries + pii temiz, web build yeşil; mobil + dark 390px'te canlı doğrulandı.
+
+| Kalem | Denetim kaynağı | Düzeltme | Kanıt |
+|---|---|---|---|
+| **Ders odası durum çelişkisi** (yeşil "Completed" + mavi "Under review" birlikte) | Eğitmen G2 · Sahip G3 · D1 | `getRoom` artık `review_required` döndürüyor; başlık rozeti `settled`→"Completed", `ended`+review→"Under review" olarak ayrışıyor (alt kartla tutarlı) | `session.ts` (`loadSlotSession`/`getRoom`), `ders/[token]/page.tsx` (`completed`/`underReview`) |
+| **Mobil yatay taşma (390px)** — stat karoları/başlıklar sağdan kırpılıyordu | Eğitmen G1 | Grid/flex çocuklarına `min-width:0` + uzun değer/token kırma; ≤430px'te stat-grid tek sütun, büyük tipografi küçülür; kartlar daha dar padding | `globals.css` (`.stat`/`.row>div`/`.balance`/`.mono` + yeni `@media(max-width:430px)`) — ölçüm: 390px'te `scrollWidth==clientWidth`, sayfa yatay kaymıyor (tablolar wrapper içinde kayıyor) |
+| **Dark mode yok** (Manila gece dersleri) | Eğitmen G3 · Okul D9 | `prefers-color-scheme: dark` altında "liquid glass" dili koyu zeminde yeniden kuruldu (token'lar + sabit beyaz yüzeyler override); `themeColor` tema-duyarlı; ışık yolu değişmedi | `globals.css` (dark blok), `layout.tsx` (`themeColor`), `panel` clawback rengi token'landı |
+
+Not: Eğitmen paneli "İncelemedeki dersler" bölümü ve Upcoming'in review/settled dersleri dışlaması Tur E'de zaten kapanmıştı (`getPanel.reviewLessons` + `NOT EXISTS ... status IN ('ended','settled')`) — bu turda tekrar açılmadı. Kalan küçük UX kalemleri (payout satırının ders-bazlı kırılımı, "sonraki ödeme tarihi" kutusu — cadence verisi olmadığından uydurulmayacak) bilinçli açık.

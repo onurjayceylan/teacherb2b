@@ -82,6 +82,7 @@ interface SlotSessionRow {
   session_id: string | null;
   session_status: string | null;
   dosage_min: number | null;
+  review_required: boolean | null;
 }
 
 /** Slot + (varsa) session + onaylı eğitmen — platform bağlamında tek sorgu. */
@@ -91,7 +92,8 @@ async function loadSlotSession(db: Db, slotId: string): Promise<SlotSessionRow |
             s.teacher_pay_cents, s.class_group_id, cg.name AS class_name,
             dp.school_tz, dp.lesson_link,
             t.full_name AS teacher_name, t.timezone AS teacher_tz,
-            cs.id AS session_id, cs.status AS session_status, cs.dosage_min
+            cs.id AS session_id, cs.status AS session_status, cs.dosage_min,
+            cs.review_required
        FROM booking_slot s
        JOIN class_group cg ON cg.id = s.class_group_id
        LEFT JOIN dosage_plan dp ON dp.id = s.plan_id
@@ -143,6 +145,10 @@ export const sessionRouter = router({
         startsAtLocal: formatInZone(row.starts_at, row.teacher_tz),
         durationMin: Math.round((row.ends_at.getTime() - row.starts_at.getTime()) / 60_000),
         dosageMin: row.dosage_min,
+        // Ödeme incelemede mi: kısa ders settle OLMADI (status 'ended' + review_required).
+        // Ders odası başlık rozetinin doğru ayrımı için — 'ended'+review => "Under review",
+        // 'settled' => "Completed". Yanlış "Completed" yeşilini önler.
+        reviewRequired: row.review_required === true,
         // Eğitmenin ders ücreti — okul fiyatı (price_cents) BİLİNÇLİ olarak dönmez.
         teacherPayCents: Number(row.teacher_pay_cents),
         // P1-H: dersin yeri (okulun Zoom/Meet linki) — eğitmen buradan katılır.

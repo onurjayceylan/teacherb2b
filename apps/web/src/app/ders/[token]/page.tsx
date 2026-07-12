@@ -28,6 +28,8 @@ interface Room {
   startsAtLocal: string;
   durationMin: number;
   dosageMin: number | null;
+  // Ödeme incelemede mi (kısa ders settle olmadı) — başlık rozeti "Under review" olur.
+  reviewRequired: boolean;
   teacherPayCents: number;
   // P1-H: dersin yeri (okulun Zoom/Meet linki) — eğitmen buradan derse girer.
   lessonLink: string | null;
@@ -184,7 +186,12 @@ export default function DersPage() {
   }
 
   const started = room.sessionStatus === "started";
-  const done = room.sessionStatus === "ended" || room.sessionStatus === "settled";
+  const settled = room.sessionStatus === "settled";
+  const done = room.sessionStatus === "ended" || settled;
+  // Ders bitti ama kısa olduğu için settle OLMADI → başlıkta "Completed" DEĞİL
+  // "Under review" gösterilir (alt karttaki rozetle tutarlı; denetim D1/G2 çelişkisi).
+  const underReview = room.sessionStatus === "ended" && room.reviewRequired;
+  const completed = settled || (room.sessionStatus === "ended" && !room.reviewRequired);
   const notStarted = !started && !done;
 
   return (
@@ -200,7 +207,8 @@ export default function DersPage() {
       >
         <h1 style={{ margin: 0 }}>{room.className} — lesson room</h1>
         {started ? <span className="badge info">In progress</span> : null}
-        {done ? <span className="badge ok">Completed</span> : null}
+        {completed ? <span className="badge ok">Completed</span> : null}
+        {underReview ? <span className="badge info">Under review</span> : null}
       </div>
       <p className="muted">Hi {room.teacherName}.</p>
 

@@ -12,7 +12,11 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#f4f5f9",
+  // Mobil tarayıcı chrome'u sistem temasına uysun (denetim G3: dark mode).
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f4f5f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0f1c" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

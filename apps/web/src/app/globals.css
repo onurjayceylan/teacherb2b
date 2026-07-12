@@ -352,11 +352,15 @@ td button {
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 
 .mono {
   font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
   font-size: 0.86em;
+  /* Wise referansı/IBAN gibi boşluksuz uzun token'lar dar ekranda kırılsın. */
+  overflow-wrap: anywhere;
 }
 
 /* ---------- rozetler ---------- */
@@ -399,6 +403,9 @@ td button {
 
 .row > div {
   flex: 1 1 14rem;
+  /* flex çocuğu içeriğinden daha dar olabilsin — uzun değer/token dar ekranda
+     hücreyi şişirip gövdeyi yatay kaydırmasın (denetim G1). */
+  min-width: 0;
 }
 
 .actions {
@@ -428,6 +435,8 @@ td button {
   box-shadow:
     inset 0 1px 1px rgba(255, 255, 255, 0.9),
     0 10px 24px -14px rgba(46, 84, 190, 0.35);
+  /* grid track'i içeriğe göre büyümesin; uzun değer kırılsın, taşmasın (G1). */
+  min-width: 0;
 }
 
 .stat .k {
@@ -443,6 +452,7 @@ td button {
   letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
   margin-top: 0.15rem;
+  overflow-wrap: break-word;
 }
 
 .stat.alert {
@@ -542,5 +552,196 @@ td button {
 
   .balance {
     font-size: 2rem;
+  }
+
+  /* Dar ekranda kartın yatay padding'i içeriğe daha çok yer bıraksın (G1). */
+  .card {
+    padding: 1.25rem 1.15rem;
+  }
+
+  .stat {
+    padding: 0.85rem 0.95rem;
+  }
+}
+
+/* Telefon (denetim G1: 390px'te stat karoları/başlıklar sağdan kırpılıyordu).
+   Stat grid'i tek sütuna indir + büyük tipografiyi küçült — hiçbir şey gövdeyi
+   yatay kaydırmaz. */
+@media (max-width: 430px) {
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat .v {
+    font-size: 1.4rem;
+  }
+
+  .balance {
+    font-size: 1.75rem;
+  }
+
+  .card {
+    padding: 1.1rem 0.95rem;
+  }
+
+  table {
+    font-size: 0.86rem;
+  }
+}
+
+/* ---------- karanlık mod (denetim G3: Manila'da gece 03:00 dersleri) ----------
+   Sinyal: sistem tercihi (prefers-color-scheme). Uygulamada tema anahtarı yok.
+   Aynı "liquid glass" dili koyu zeminde: token'lar + sabit beyaz yüzeyler burada
+   override edilir. Işık yolu (yukarısı) HİÇ değişmez — dark tamamen additive. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #eef1fb;
+    --muted: #9aa4bd;
+    --accent: #4aa3ff;
+    --accent-deep: #8cc0ff;
+    --ok: #46d07a;
+    --ok-tint: rgba(48, 209, 88, 0.18);
+    --danger: #ff6b60;
+    --danger-tint: rgba(255, 69, 58, 0.2);
+    --info-tint: rgba(74, 163, 255, 0.16);
+    --hairline: rgba(255, 255, 255, 0.1);
+    --glass-fill: rgba(36, 42, 66, 0.55);
+    --glass-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.12),
+      inset 0 -1px 1px rgba(0, 0, 0, 0.35),
+      0 24px 60px -24px rgba(0, 0, 0, 0.66),
+      0 6px 18px -8px rgba(0, 0, 0, 0.5);
+  }
+
+  body {
+    background-color: #0b0f1c;
+    background-image:
+      radial-gradient(46rem 34rem at 8% -8%, rgba(56, 108, 220, 0.34), transparent 58%),
+      radial-gradient(40rem 30rem at 100% 0%, rgba(128, 78, 220, 0.3), transparent 58%),
+      radial-gradient(36rem 28rem at 84% 82%, rgba(210, 70, 150, 0.22), transparent 60%),
+      radial-gradient(44rem 34rem at 0% 100%, rgba(40, 160, 180, 0.24), transparent 60%),
+      linear-gradient(180deg, #0e1326 0%, #0b0f1c 100%);
+  }
+
+  ::selection {
+    background: rgba(74, 163, 255, 0.35);
+  }
+
+  .topbar,
+  .card {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+
+  .topbar a:not(.brand) {
+    color: #b7c2d8;
+  }
+
+  .topbar a:not(.brand):hover {
+    color: var(--accent-deep);
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  input,
+  select,
+  textarea {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.14);
+    color: var(--ink);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #7c869c;
+  }
+
+  input:focus,
+  select:focus,
+  textarea:focus {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(74, 163, 255, 0.6);
+    box-shadow: 0 0 0 4px rgba(74, 163, 255, 0.22), inset 0 1px 2px rgba(0, 0, 0, 0.25);
+  }
+
+  button.secondary {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.16);
+    color: var(--accent-deep);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.14),
+      0 6px 16px -8px rgba(0, 0, 0, 0.5);
+  }
+
+  button.secondary:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.14);
+  }
+
+  button:disabled {
+    background: linear-gradient(180deg, #3a4256, #2c3242);
+    color: #8b94a6;
+  }
+
+  .table-wrap {
+    border-color: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.03);
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.06);
+  }
+
+  th {
+    color: #93a0b8;
+  }
+
+  tbody tr:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .stat {
+    background:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.03) 100%);
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow:
+      inset 0 1px 1px rgba(255, 255, 255, 0.1),
+      0 10px 24px -14px rgba(0, 0, 0, 0.5);
+  }
+
+  .stat .k {
+    color: #93a0b8;
+  }
+
+  .stat.alert {
+    background:
+      linear-gradient(135deg, rgba(255, 90, 80, 0.2) 0%, rgba(255, 90, 80, 0.08) 100%);
+    border-color: rgba(255, 110, 100, 0.45);
+  }
+
+  .badge {
+    box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  }
+
+  .empty {
+    border-color: rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .balance {
+    background: linear-gradient(120deg, #eef1fb 20%, #4aa3ff 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero h1 {
+    background: linear-gradient(115deg, #ffffff 25%, #4aa3ff 70%, #a98cff 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero p {
+    color: #aeb8d0;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22);
   }
 }

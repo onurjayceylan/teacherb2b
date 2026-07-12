@@ -342,7 +342,7 @@ export default function EgitmenPanelPage() {
               {panel.adjustments.map((a, i) => (
                 <li
                   key={`${a.kind}-${i}`}
-                  style={{ color: "#b42318", padding: "0.15rem 0", fontSize: "0.92rem" }}
+                  style={{ color: "var(--danger)", padding: "0.15rem 0", fontSize: "0.92rem" }}
                 >
                   {formatCents(a.amountCents)} — dispute refund
                   {a.lessonDayLocal ? ` (lesson on ${a.lessonDayLocal})` : ` (${a.occurredAtLocal})`}
