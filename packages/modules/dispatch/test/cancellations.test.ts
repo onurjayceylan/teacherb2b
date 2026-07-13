@@ -477,3 +477,102 @@ describe("teacherNoShow", () => {
     await assertInvariantsClean(tdb.pool);
   });
 });
+
+/**
+ * P1 (denetim tur 3): ders BAŞLADIKTAN sonra (class_session started/ended) slot 'scheduled'
+ * kalır — eski guard (yalnız slot.status) bunu droppable/iptal-edilebilir sanıyordu. Sonuç:
+ * verilmiş dersin hold'u okula haksız iade + eğitmenin emeği kalıcı ödenemez orphan.
+ */
+describe("ders başlamışsa iptal/drop/no-show yasak (session guard)", () => {
+  /** Slot için class_session'ı doğrudan verilen durumda kurar (trigger yalnız UPDATE'te). */
+  async function insertSession(slotId: string, teacherId: string, status: string): Promise<void> {
+    await tdb.pool.withPlatform(async (db) => {
+      const slot = await db.query<{ school_id: string; class_group_id: string }>(
+        "SELECT school_id, class_group_id FROM booking_slot WHERE id = $1",
+        [slotId],
+      );
+      const row = slot.rows[0]!;
+      await db.query(
+        `INSERT INTO class_session (slot_id, school_id, teacher_id, class_group_id, status)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [slotId, row.school_id, teacherId, row.class_group_id, status],
+      );
+    });
+  }
+
+  async function begunScenario(name: string, sessionStatus: string) {
+    const s = await scenario({
+      name,
+      priceCents: 9_000,
+      teacherPayCents: 5_000,
+      topupCents: 9_000,
+      weeks: 1,
+      daysAhead: 9,
+    });
+    await seedTeacher(tdb.pool, {
+      email: `${name}@example.com`,
+      timezone: TZ,
+      poolId: s.poolId,
+      availability: allWeekAvailability(),
+    });
+    const slotId = s.slotIds[0]!;
+    const teacherId = await offerAndAccept(slotId);
+    await insertSession(slotId, teacherId, sessionStatus);
+    return { s, slotId, teacherId };
+  }
+
+  it("teacherDrop: 'ended' (review kuyruğu) ders reddedilir — slot/hold/bakiye korunur", async () => {
+    const { s, slotId } = await begunScenario("begun_drop", "ended");
+    await expect(teacherDrop(tdb.pool, { slotId })).rejects.toThrow(/already started/i);
+    const state = await slotState(slotId);
+    expect(state.status).toBe("scheduled"); // slot dokunulmadı
+    expect(state.hold_released_txn_id).toBeNull(); // hold iade EDİLMEDİ
+    expect(await balance(tdb.pool, "school", s.schoolId, "wallet_hold")).toBe(9_000);
+    expect(await balance(tdb.pool, "school", s.schoolId, "school_cash")).toBe(0);
+    expect(await assignments(slotId)).toEqual([{ teacher_id: expect.any(String), status: "confirmed" }]);
+    await assertInvariantsClean(tdb.pool);
+  });
+
+  it("teacherDropByTeacher: 'started' ders reddedilir", async () => {
+    const { slotId, teacherId } = await begunScenario("begun_drop_self", "started");
+    await expect(
+      teacherDropByTeacher(tdb.pool, { slotId, teacherId }),
+    ).rejects.toThrow(/already started/i);
+    expect((await slotState(slotId)).status).toBe("scheduled");
+    await assertInvariantsClean(tdb.pool);
+  });
+
+  it("cancelBySchool: 'started' ders reddedilir (erken-start penceresi)", async () => {
+    const { s, slotId } = await begunScenario("begun_cancel", "started");
+    await expect(cancelBySchool(tdb.pool, { slotId })).rejects.toThrow(/ders başlamış/);
+    const state = await slotState(slotId);
+    expect(state.status).toBe("scheduled");
+    expect(state.hold_released_txn_id).toBeNull();
+    expect(await balance(tdb.pool, "school", s.schoolId, "wallet_hold")).toBe(9_000);
+    await assertInvariantsClean(tdb.pool);
+  });
+
+  it("teacherNoShow: 'ended' ders reddedilir (haksız strike/iade önlenir)", async () => {
+    const { slotId, teacherId } = await begunScenario("begun_noshow", "ended");
+    await expect(teacherNoShow(tdb.pool, { slotId })).rejects.toThrow(/ders başlamış/);
+    expect((await slotState(slotId)).status).toBe("scheduled");
+    const strike = await tdb.pool.withPlatform(async (db) => {
+      const r = await db.query<{ strike_count: number }>(
+        "SELECT strike_count FROM teacher WHERE id = $1",
+        [teacherId],
+      );
+      return r.rows[0]!.strike_count;
+    });
+    expect(strike).toBe(0); // strike verilmedi
+    await assertInvariantsClean(tdb.pool);
+  });
+
+  it("'created' (oda açık, ders başlamamış) hâlâ droppable", async () => {
+    const { slotId } = await begunScenario("begun_created", "created");
+    // 'created' = emek/para yok → drop serbest (aday yoksa cancelled_teacher + iade)
+    const result = await teacherDrop(tdb.pool, { slotId });
+    expect(result).toEqual({ reoffered: false });
+    expect((await slotState(slotId)).status).toBe("cancelled_teacher");
+    await assertInvariantsClean(tdb.pool);
+  });
+});

@@ -19,7 +19,8 @@ export interface HeldTeacher {
 }
 
 export interface CreateBatchResult {
-  batchId: string;
+  /** ≥1 payout açıldıysa batch id; ödenecek kimse yoksa null (boş batch OLUŞTURULMAZ). */
+  batchId: string | null;
   /** açılan payout satırı sayısı */
   payouts: number;
   totalCents: number;
@@ -42,14 +43,8 @@ export async function createBatch(
   input: CreateBatchInput,
 ): Promise<CreateBatchResult> {
   return pool.withPlatform(async (db) => {
-    const batchRes = await db.query<{ id: string }>(
-      `INSERT INTO payout_batch (period_start, period_end, created_by)
-       VALUES ($1, $2, $3) RETURNING id`,
-      [input.periodStart, input.periodEnd, input.createdBy ?? null],
-    );
-    const batchId = batchRes.rows[0]!.id;
-
     // Pozitif payable bakiyesi olan tüm eğitmenler (hard-gate ayrımı uygulamada yapılır).
+    // Aday listesi batch INSERT'inden ÖNCE alınır → ödenecek kimse yoksa boş batch açılmaz.
     const candidates = await db.query<{
       teacher_id: string;
       payout_ready: boolean;
@@ -68,16 +63,32 @@ export async function createBatch(
     );
 
     const heldTeachers: HeldTeacher[] = [];
+    // Ödenebilir adaylar: payout_ready + açık payout'u olmayan. Bunlardan en az biri
+    // yoksa batch OLUŞTURULMAZ (tutulan eğitmenler yine görünürlük için raporlanır).
+    const payable = candidates.rows.filter((c) => {
+      if (!c.payout_ready) {
+        heldTeachers.push({ teacherId: c.teacher_id, amountCents: Number(c.balance_cents) });
+        return false;
+      }
+      return !c.has_open_payout; // açık payout varken yeni satır = çift ödeme riski
+    });
+
+    if (payable.length === 0) {
+      return { batchId: null, payouts: 0, totalCents: 0, heldTeachers };
+    }
+
+    const batchRes = await db.query<{ id: string }>(
+      `INSERT INTO payout_batch (period_start, period_end, created_by)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [input.periodStart, input.periodEnd, input.createdBy ?? null],
+    );
+    const batchId = batchRes.rows[0]!.id;
+
     let payouts = 0;
     let totalCents = 0;
 
-    for (const c of candidates.rows) {
+    for (const c of payable) {
       const amount = Number(c.balance_cents); // pg bigint → string
-      if (!c.payout_ready) {
-        heldTeachers.push({ teacherId: c.teacher_id, amountCents: amount });
-        continue;
-      }
-      if (c.has_open_payout) continue; // açık payout varken yeni satır = çift ödeme riski
 
       const payoutRes = await db.query<{ id: string }>(
         `INSERT INTO payout (batch_id, teacher_id, amount_cents, provider_idempotency_key)
@@ -89,6 +100,11 @@ export async function createBatch(
       // Dönem içi settled ve henüz canlı bir payout'a bağlanmamış session'lar bu payout'a
       // bağlanır (satır tutarı = slot'un eğitmen payı). Failed/cancelled payout'un
       // satırları "canlı değil" sayılır → sonraki batch aynı session'ları yeniden toplar.
+      // İtiraz-iade edilmiş (resolved_refund) session'lar HARİÇ: settle'ları ters kayıtla geri
+      // alınmıştır (bakiyeden düşmüştür) → payout satırı olarak sayılırlarsa iade edilen ders
+      // "ödenmiş" görünürdü. (Not: bu yalnız iade edilen dersin satıra girmesini engeller; hiçbir
+      // invariant satır-tutar özdeşliğini garanti ETMEZ — negatif-bakiye netting'inde sonraki
+      // dönemde sum(payout_line) payout tutarını yine aşabilir; bkz. listOverpaidTeachers.)
       await db.query(
         `INSERT INTO payout_line (payout_id, session_id, amount_cents)
          SELECT $1, s.id, sl.teacher_pay_cents
@@ -98,6 +114,9 @@ export async function createBatch(
             AND s.status = 'settled'
             AND s.ended_at >= $3::date
             AND s.ended_at < $4::date + 1
+            AND NOT EXISTS (
+              SELECT 1 FROM session_dispute d
+               WHERE d.session_id = s.id AND d.status = 'resolved_refund')
             AND NOT EXISTS (
               SELECT 1 FROM payout_line pl
                 JOIN payout p ON p.id = pl.payout_id

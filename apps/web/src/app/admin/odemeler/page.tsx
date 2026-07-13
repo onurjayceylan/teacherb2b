@@ -7,6 +7,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { errorMessage, formatCents, trpc } from "../../../lib/trpc";
 
+// Wise fonlaması idempotency anahtarının kalıcı saklama yeri (reload/sekmeler arası dedup).
+const FUND_KEY_STORAGE = "teachernow.wiseFundingKey";
+
 interface Batch {
   id: string;
   periodStart: string;
@@ -40,7 +43,8 @@ interface HeldTeacher {
 }
 
 interface CreateResult {
-  batchId: string;
+  /** Ödenecek eğitmen yoksa null — boş batch oluşturulmaz. */
+  batchId: string | null;
   payoutCount: number;
   totalCents: number;
   heldTeachers: HeldTeacher[];
@@ -62,6 +66,13 @@ interface MissingPayoutTeacher {
   teacherId: string;
   name: string;
   email: string;
+}
+
+interface OverpaidTeacher {
+  teacherId: string;
+  name: string;
+  email: string;
+  owedCents: number;
 }
 
 interface Chargeback {
@@ -155,6 +166,7 @@ export default function OdemelerPage() {
   const [sweep, setSweep] = useState<SweepResult | null>(null);
 
   const [missingPayout, setMissingPayout] = useState<MissingPayoutTeacher[]>([]);
+  const [overpaid, setOverpaid] = useState<OverpaidTeacher[]>([]);
   const [chargebacks, setChargebacks] = useState<Chargeback[]>([]);
   const [snapshots, setSnapshots] = useState<BalanceSnapshot[]>([]);
   const [reconciliation, setReconciliation] = useState<Reconciliation[]>([]);
@@ -163,19 +175,59 @@ export default function OdemelerPage() {
   const [fundings, setFundings] = useState<WiseFunding[]>([]);
   const [fundAmount, setFundAmount] = useState("");
   const [fundNote, setFundNote] = useState("");
+  // Fonlama idempotency anahtarı: çift-tık AMA AYNI ZAMANDA reload/2. sekme yeniden-gönderimi
+  // de deduplike edilsin diye localStorage'da KALICI tutulur (aynı fiziksel transfer, tek kayıt).
+  // Anahtar yalnız BAŞARILI gönderimde tazelenir → sonraki gerçek transfer yeni anahtar alır.
+  // SSR'de boş başlar (hydration uyumu); localStorage istisnası (private mode) sessizce yutulur.
+  const [fundKey, setFundKey] = useState("");
+  useEffect(() => {
+    if (fundKey) return;
+    let k = "";
+    try {
+      k = localStorage.getItem(FUND_KEY_STORAGE) ?? "";
+    } catch {
+      /* localStorage erişilemez */
+    }
+    if (!k) {
+      k = crypto.randomUUID();
+      try {
+        localStorage.setItem(FUND_KEY_STORAGE, k);
+      } catch {
+        /* yoksay */
+      }
+    }
+    setFundKey(k);
+  }, [fundKey]);
+  function rotateFundKey() {
+    const k = crypto.randomUUID();
+    try {
+      localStorage.setItem(FUND_KEY_STORAGE, k);
+    } catch {
+      /* yoksay */
+    }
+    setFundKey(k);
+  }
 
   const load = useCallback(async () => {
     setLoadError(null);
     try {
-      const [batchesRes, recentRes, missingRes, chargebacksRes, balancesRes, fundingsRes] =
-        await Promise.all([
-          trpc.payouts.listBatches.query(),
-          trpc.payouts.listRecent.query(),
-          trpc.payouts.missingPayoutDetails.query(),
-          trpc.admin.listChargebacks.query(),
-          trpc.admin.listExternalBalances.query(),
-          trpc.admin.listWiseFundings.query(),
-        ]);
+      const [
+        batchesRes,
+        recentRes,
+        missingRes,
+        chargebacksRes,
+        balancesRes,
+        fundingsRes,
+        overpaidRes,
+      ] = await Promise.all([
+        trpc.payouts.listBatches.query(),
+        trpc.payouts.listRecent.query(),
+        trpc.payouts.missingPayoutDetails.query(),
+        trpc.admin.listChargebacks.query(),
+        trpc.admin.listExternalBalances.query(),
+        trpc.admin.listWiseFundings.query(),
+        trpc.payouts.listOverpaid.query(),
+      ]);
       setBatches(batchesRes);
       setRecent(recentRes);
       setMissingPayout(missingRes);
@@ -183,6 +235,7 @@ export default function OdemelerPage() {
       setSnapshots(balancesRes.snapshots);
       setReconciliation(balancesRes.reconciliation);
       setFundings(fundingsRes);
+      setOverpaid(overpaidRes);
     } catch (err) {
       setLoadError(errorMessage(err));
     } finally {
@@ -276,15 +329,43 @@ export default function OdemelerPage() {
             </p>
           </div>
         ) : null}
+        {overpaid.length > 0 ? (
+          <div>
+            <p className="error">
+              ⚠ Fazla ödenen (negatif bakiyeli) eğitmenler — platforma borçlu (netting):
+            </p>
+            <ul>
+              {overpaid.map((t) => (
+                <li key={t.teacherId}>
+                  {t.name} <span className="muted">({t.email})</span> —{" "}
+                  <strong>{formatCents(t.owedCents)}</strong> fazla ödendi
+                </li>
+              ))}
+            </ul>
+            <p className="muted">
+              Sebep: itiraz-iadesi payout gönderildikten/ödendikten sonra çözüldü. Bu borç sonraki
+              kazançtan mahsup edilir; ledger değişmezliği korunur ama tahsili elle takip edilmeli.
+            </p>
+          </div>
+        ) : null}
         <form
           onSubmit={(e) => {
             e.preventDefault();
             void run(async () => {
               const res = await trpc.payouts.createBatch.mutate({ periodStart, periodEnd });
               setCreateResult(res);
-              setNotice(
-                `Batch oluştu — ${res.payoutCount} payout, toplam ${formatCents(res.totalCents)}`,
-              );
+              if (res.batchId === null) {
+                // Ödenecek eğitmen yok → boş batch açılmaz; tutulan eğitmenler yine gösterilir.
+                setNotice(
+                  res.heldTeachers.length > 0
+                    ? `Ödenecek eğitmen yok — batch oluşturulmadı (${res.heldTeachers.length} eğitmen evrak bekliyor)`
+                    : "Ödenecek eğitmen yok — batch oluşturulmadı",
+                );
+              } else {
+                setNotice(
+                  `Batch oluştu — ${res.payoutCount} payout, toplam ${formatCents(res.totalCents)}`,
+                );
+              }
               await selectBatch(res.batchId);
             }, null);
           }}
@@ -662,14 +743,22 @@ export default function OdemelerPage() {
               setActionError("Geçerli bir pozitif tutar girin (örn. 500.00)");
               return;
             }
+            const key = fundKey || crypto.randomUUID();
             void run(async () => {
-              await trpc.admin.recordWiseFunding.mutate({
+              const res = await trpc.admin.recordWiseFunding.mutate({
                 amountUsd: parsed,
+                idempotencyKey: key,
                 ...(fundNote.trim() ? { note: fundNote.trim() } : {}),
               });
               setFundAmount("");
               setFundNote("");
-            }, "Wise fonlaması ledger'a işlendi");
+              rotateFundKey(); // yalnız BAŞARIDA tazele → sonraki gerçek transfer yeni anahtar alsın
+              setNotice(
+                res.alreadyRecorded
+                  ? "Bu fonlama zaten kaydedilmişti — çift gönderim yok sayıldı"
+                  : "Wise fonlaması ledger'a işlendi",
+              );
+            }, null);
           }}
         >
           <div className="row">

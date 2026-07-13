@@ -20,9 +20,11 @@ export {
   listOpen,
   getTeacherPayouts,
   teachersMissingPayoutDetails,
+  listOverpaidTeachers,
   type OpenPayoutRow,
   type TeacherPayoutRow,
   type TeacherMissingPayoutDetailsRow,
+  type OverpaidTeacherRow,
 } from "./queries.js";
 export {
   recordWiseFunding,

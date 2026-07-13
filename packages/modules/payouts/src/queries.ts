@@ -81,6 +81,42 @@ export async function teachersMissingPayoutDetails(
   return res.rows.map((r) => ({ teacherId: r.id, name: r.full_name, email: r.email }));
 }
 
+export interface OverpaidTeacherRow {
+  teacherId: string;
+  name: string;
+  email: string;
+  /** eğitmenin platforma borcu = fazla ödenen tutar (negatif bakiyenin POZİTİF karşılığı). */
+  owedCents: number;
+}
+
+/**
+ * teacher_payable bakiyesi NEGATİF eğitmenler (denetim tur 3 [P2]): bir itiraz-iadesi payout
+ * gönderildikten/ödendikten sonra çözülürse eğitmen dondurulmuş (iade-öncesi) tutarı tam alır →
+ * alacağı eksiye düşer (teacher_payable min_zero DEĞİL). Bu bir NETTING borcudur, ledger
+ * invariant'ı bunu yakalamaz (trial balance korunur) ve createBatch balance>0 süzdüğü için
+ * eğitmen hiçbir payout ekranında görünmez. Burada admin'e yüzeye çıkarılır — sessiz kalmaz.
+ */
+export async function listOverpaidTeachers(db: Db): Promise<OverpaidTeacherRow[]> {
+  const res = await db.query<{
+    id: string;
+    full_name: string;
+    email: string;
+    balance_cents: string;
+  }>(
+    `SELECT t.id, t.full_name, t.email, a.balance_cents
+       FROM ledger_account a
+       JOIN teacher t ON t.id = a.owner_id
+      WHERE a.owner_type = 'teacher' AND a.kind = 'teacher_payable' AND a.balance_cents < 0
+      ORDER BY a.balance_cents ASC`,
+  );
+  return res.rows.map((r) => ({
+    teacherId: r.id,
+    name: r.full_name,
+    email: r.email,
+    owedCents: -Number(r.balance_cents), // negatif bakiye → pozitif borç
+  }));
+}
+
 /** Eğitmenin son payout'ları (portal paneli). */
 export async function getTeacherPayouts(
   pool: ActorPool,

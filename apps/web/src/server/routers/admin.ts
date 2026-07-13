@@ -1094,6 +1094,8 @@ export const adminRouter = router({
       z.object({
         amountUsd: z.number().positive().max(10_000_000),
         note: z.string().trim().max(500).optional(),
+        // İstemcinin form-başına ürettiği idempotency anahtarı (çift-tık/yeniden gönderim koruması).
+        idempotencyKey: z.string().min(8).max(100).optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -1103,6 +1105,7 @@ export const adminRouter = router({
           amountCents,
           createdBy: ctx.actor.userId,
           ...(input.note ? { note: input.note } : {}),
+          ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
         }),
       );
     }),

@@ -109,16 +109,17 @@ export async function settleSession(
         (slot.ends_at.getTime() - slot.starts_at.getTime()) / 60_000,
       );
       const reasons: string[] = [];
+      // review_reason eğitmen panelinde gösterilir → eğitmen-yüzlü metin İngilizce.
       if (
         session.started_at &&
         session.started_at.getTime() < slot.starts_at.getTime() - EARLY_START_GRACE_MS
       ) {
         reasons.push(
-          `erken başlatma: planlanan ${slot.starts_at.toISOString()} yerine ${session.started_at.toISOString()}`,
+          `early start: started at ${session.started_at.toISOString()} (scheduled ${slot.starts_at.toISOString()})`,
         );
       }
       if (dosageMin < plannedMin * 0.5) {
-        reasons.push(`kısa ders: ${dosageMin} dk (planlanan ${plannedMin} dk)`);
+        reasons.push(`short lesson: ${dosageMin} min (planned ${plannedMin} min)`);
       }
       if (reasons.length > 0) {
         const reason = reasons.join(" / ");
@@ -155,6 +156,10 @@ export async function settleSession(
     const platformCut = price - teacherPay; // DB CHECK: teacher_pay <= price → negatif olamaz
 
     const holdId = await ensureAccount(db, "school", slot.school_id, "wallet_hold");
+    // Alacak session.teacher_id'ye yazılır. Bunun güncel confirmed eğitmen olması
+    // ensureSessionForSlot'un start ANINDA yaptığı senkron'a dayanır (teklif-tekrarında
+    // 'created' oturum eski eğitmende kalabilirdi) — 'ended'e ancak o senkronlu start'tan
+    // geçilir, o yüzden settle burada yeniden senkron aramaz.
     const payableId = await ensureAccount(db, "teacher", session.teacher_id, "teacher_payable");
     const revenueId = await ensureAccount(db, "platform", null, "platform_revenue");
 

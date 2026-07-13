@@ -101,3 +101,32 @@ test("listWiseFundings: tarihçe en yeni önce; geçersiz tutar reddedilir", asy
     tdb.pool.withPlatform((db) => recordWiseFunding(db, { amountCents: -100 })),
   ).rejects.toThrow(/pozitif tam sayı/);
 });
+
+test("idempotency: aynı anahtarla ikinci çağrı ledger'a DOKUNMAZ, mevcut olayı döner", async () => {
+  const before = await tdb.pool.withPlatform((db) => clearingSum(db, "wise_clearing"));
+  const key = `funding-test-${randomUUID()}`;
+
+  const first = await tdb.pool.withPlatform((db) =>
+    recordWiseFunding(db, { amountCents: 3_000, idempotencyKey: key }),
+  );
+  expect(first.alreadyRecorded).toBe(false);
+  const afterFirst = await tdb.pool.withPlatform((db) => clearingSum(db, "wise_clearing"));
+  expect(afterFirst).toBe(before - 3_000); // fonlama −X
+
+  // Aynı anahtar tekrar (çift-tık): yeni txn YOK, aynı olay/txn, bakiye DEĞİŞMEZ.
+  const second = await tdb.pool.withPlatform((db) =>
+    recordWiseFunding(db, { amountCents: 3_000, idempotencyKey: key }),
+  );
+  expect(second.alreadyRecorded).toBe(true);
+  expect(second.fundingId).toBe(first.fundingId);
+  expect(second.txnId).toBe(first.txnId);
+  expect(await tdb.pool.withPlatform((db) => clearingSum(db, "wise_clearing"))).toBe(afterFirst);
+
+  // Anahtarsız çağrılar her seferinde ayrı olay (geriye uyumluluk).
+  const a = await tdb.pool.withPlatform((db) => recordWiseFunding(db, { amountCents: 1_000 }));
+  const b = await tdb.pool.withPlatform((db) => recordWiseFunding(db, { amountCents: 1_000 }));
+  expect(a.fundingId).not.toBe(b.fundingId);
+  expect(a.alreadyRecorded).toBe(false);
+  expect(b.alreadyRecorded).toBe(false);
+  expect(await invariantClean()).toBe(true);
+});

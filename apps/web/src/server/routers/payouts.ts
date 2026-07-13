@@ -10,6 +10,7 @@ import {
   getTeacherPayouts,
   importResults,
   listOpen,
+  listOverpaidTeachers,
   markBatchSubmitted,
   teachersMissingPayoutDetails,
   type ImportResultRow,
@@ -273,6 +274,12 @@ export const payoutsRouter = router({
             return new Map(rows.rows.map((r) => [r.id, r.full_name]));
           });
     return open.map((p) => ({ ...p, teacherName: names.get(p.teacherId) ?? p.teacherId }));
+  }),
+
+  // Fazla ödenen (negatif teacher_payable) eğitmenler — itiraz-vs-payout zamanlamasından
+  // doğan sessiz netting borcu. Boş liste = temiz; dolu liste operasyon uyarısıdır.
+  listOverpaid: platformProcedure.query(async ({ ctx }) => {
+    return ctx.pool.withPlatform((db) => listOverpaidTeachers(db));
   }),
 
   // Operasyon tablosu: son payout'lar (TÜM durumlar) — failed sebepleri + Wise ref dahil.

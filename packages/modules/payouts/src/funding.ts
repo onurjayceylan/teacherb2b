@@ -12,17 +12,27 @@ export interface RecordWiseFundingInput {
   amountCents: number;
   note?: string;
   createdBy?: string | null;
+  /**
+   * İstemcinin fonlama formuna özel idempotency anahtarı. Verilirse aynı anahtarla ikinci
+   * çağrı YENİ ledger txn YAZMAZ — mevcut olayı aynen döner (çift-tık/yeniden gönderim
+   * mutabakat baseline'ını şişirmez). Verilmezse her çağrı ayrı fiziksel transfer sayılır.
+   */
+  idempotencyKey?: string;
 }
 
 export interface RecordWiseFundingResult {
   fundingId: string;
   txnId: string;
+  /** true → bu idempotency anahtarı daha önce kaydedilmişti; ledger'a DOKUNULMADI. */
+  alreadyRecorded: boolean;
 }
 
 /**
- * "Wise'a $X yatırdım" olayını kaydeder: wise_funding_event satırı + ledger txn. Her çağrı
- * ayrı bir fiziksel transferi temsil eder (çift-tık koruması UI'ın işi); idempotency anahtarı
- * olay id'sine bağlanır, böylece aynı olay iki kez ledger'a yazılamaz.
+ * "Wise'a $X yatırdım" olayını kaydeder: wise_funding_event satırı + ledger txn. Ledger
+ * idempotency anahtarı olay id'sine bağlanır (aynı olay iki kez ledger'a yazılamaz); ayrıca
+ * istemci idempotencyKey'i verirse fat-finger çift-gönderim de sunucuda deduplike edilir.
+ * recordWiseFunding çağıranın TEK transaction'ında koşar → olay+txn ya birlikte commit olur
+ * ya da birlikte rollback; dedup çakışması "önceki çağrı tam commit oldu" demektir.
  */
 export async function recordWiseFunding(
   db: Db,
@@ -32,12 +42,31 @@ export async function recordWiseFunding(
     throw new Error(`recordWiseFunding: tutar pozitif tam sayı olmalı (${input.amountCents})`);
   }
 
-  // Önce olay satırı: ledger txn'inin ref hedefi + admin tarihçesi.
+  // Önce olay satırı: ledger txn'inin ref hedefi + admin tarihçesi. idempotencyKey varsa
+  // benzersizlik üstünde ON CONFLICT DO NOTHING → çakışmada satır dönmez, mevcut olayı döneriz.
+  const dedupKey = input.idempotencyKey ?? null;
   const ev = await db.query<{ id: string }>(
-    `INSERT INTO wise_funding_event (amount_cents, note, created_by)
-     VALUES ($1, $2, $3) RETURNING id`,
-    [input.amountCents, input.note ?? null, input.createdBy ?? null],
+    `INSERT INTO wise_funding_event (amount_cents, note, created_by, dedup_key)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (dedup_key) WHERE dedup_key IS NOT NULL DO NOTHING
+     RETURNING id`,
+    [input.amountCents, input.note ?? null, input.createdBy ?? null, dedupKey],
   );
+
+  if (ev.rows.length === 0) {
+    // dedup_key çakıştı → fonlama zaten kaydedilmiş. Ledger'a DOKUNMA, mevcut olayı dön.
+    const existing = await db.query<{ id: string; txn_id: string | null }>(
+      "SELECT id, txn_id FROM wise_funding_event WHERE dedup_key = $1",
+      [dedupKey],
+    );
+    const row = existing.rows[0];
+    if (!row?.txn_id) {
+      // Tek-transaction modelinde olay+txn birlikte commit olur → txn_id daima dolu olmalı.
+      throw new Error("recordWiseFunding: dedup çakışması ama mevcut olayın txn_id'si yok");
+    }
+    return { fundingId: row.id, txnId: row.txn_id, alreadyRecorded: true };
+  }
+
   const fundingId = ev.rows[0]!.id;
 
   const wiseId = await ensureAccount(db, "platform", null, "wise_clearing");
@@ -54,7 +83,7 @@ export async function recordWiseFunding(
   });
 
   await db.query("UPDATE wise_funding_event SET txn_id = $1 WHERE id = $2", [txnId, fundingId]);
-  return { fundingId, txnId };
+  return { fundingId, txnId, alreadyRecorded: false };
 }
 
 export interface WiseFundingRow {

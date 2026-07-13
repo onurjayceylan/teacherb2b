@@ -11,6 +11,7 @@ import {
   getTeacherPayouts,
   importResults,
   listOpen,
+  listOverpaidTeachers,
   markBatchSubmitted,
   teachersMissingPayoutDetails,
 } from "../src/index.js";
@@ -324,7 +325,8 @@ test("createBatch: payable 3200 → 1 payout + 2 line; evraksız eğitmen batch 
   expect(await balance("teacher", readyTeacher, "teacher_payable")).toBe(3_200);
 
   const result = await createBatch(tdb.pool, { periodStart, periodEnd });
-  batch1Id = result.batchId;
+  expect(result.batchId).not.toBeNull();
+  batch1Id = result.batchId!;
   expect(result.payouts).toBe(1);
   expect(result.totalCents).toBe(3_200);
   expect(result.heldTeachers).toEqual([{ teacherId: heldTeacher, amountCents: 1_600 }]);
@@ -422,19 +424,20 @@ test("importResults failed: payable DEĞİŞMEZ; sonraki batch aynı session'lar
   expect(b2.payouts).toBe(1);
   expect(b2.totalCents).toBe(2_000);
   expect(b2.heldTeachers).toEqual([{ teacherId: heldTeacher, amountCents: 1_600 }]);
+  const b2Id = b2.batchId!;
 
   // Payout detayı GİRİLMEMİŞ eğitmen: CSV'nin yeni üç kolonu boş kalır
-  const csv = await exportBatchCsv(tdb.pool, b2.batchId);
+  const csv = await exportBatchCsv(tdb.pool, b2Id);
   expect(csv.trim().split("\n")[1]).toBe(
-    `payout:${failTeacher}:${b2.batchId},Ceyda Iban,payout.fail@example.com,20.00,USD,,,`,
+    `payout:${failTeacher}:${b2Id},Ceyda Iban,payout.fail@example.com,20.00,USD,,,`,
   );
 
-  await markBatchSubmitted(tdb.pool, b2.batchId);
+  await markBatchSubmitted(tdb.pool, b2Id);
 
   expect(
-    await importResults(tdb.pool, b2.batchId, [
+    await importResults(tdb.pool, b2Id, [
       {
-        idempotencyKey: `payout:${failTeacher}:${b2.batchId}`,
+        idempotencyKey: `payout:${failTeacher}:${b2Id}`,
         externalRef: "WISE-2001",
         status: "failed",
         failureReason: "banka hesabi dogrulanamadi",
@@ -445,7 +448,7 @@ test("importResults failed: payable DEĞİŞMEZ; sonraki batch aynı session'lar
   // LEDGER'A DOKUNULMADI: alacak korunur, wise_clearing kımıldamaz
   expect(await balance("teacher", failTeacher, "teacher_payable")).toBe(2_000);
   expect(await entrySum("platform", null, "wise_clearing")).toBe(3_200);
-  const failedPayout = (await payoutsOfBatch(b2.batchId))[0]!;
+  const failedPayout = (await payoutsOfBatch(b2Id))[0]!;
   expect(failedPayout.status).toBe("failed");
   expect(failedPayout.failure_reason).toBe("banka hesabi dogrulanamadi");
 
@@ -453,22 +456,24 @@ test("importResults failed: payable DEĞİŞMEZ; sonraki batch aynı session'lar
   const b3 = await createBatch(tdb.pool, { periodStart, periodEnd });
   expect(b3.payouts).toBe(1);
   expect(b3.totalCents).toBe(2_000);
-  const b3payout = (await payoutsOfBatch(b3.batchId))[0]!;
+  const b3Id = b3.batchId!;
+  const b3payout = (await payoutsOfBatch(b3Id))[0]!;
   expect(await linesOfPayout(b3payout.id)).toEqual([
     { session_id: failSession, amount_cents: "2000" },
   ]);
 
-  // Açık (pending) payout varken bir batch daha: aynı alacak İKİNCİ kez toplanmaz
+  // Açık (pending) payout varken bir batch daha: ödenebilir kimse yok → BOŞ BATCH açılmaz
   const b4 = await createBatch(tdb.pool, { periodStart, periodEnd });
   expect(b4.payouts).toBe(0);
   expect(b4.totalCents).toBe(0);
+  expect(b4.batchId).toBeNull();
 
   // b3'ü kapat (yeniden deneme başarılı) — sonraki test temiz bakiyelerle başlasın
-  await markBatchSubmitted(tdb.pool, b3.batchId);
+  await markBatchSubmitted(tdb.pool, b3Id);
   expect(
-    await importResults(tdb.pool, b3.batchId, [
+    await importResults(tdb.pool, b3Id, [
       {
-        idempotencyKey: `payout:${failTeacher}:${b3.batchId}`,
+        idempotencyKey: `payout:${failTeacher}:${b3Id}`,
         externalRef: "WISE-2002",
         status: "paid",
       },
@@ -482,12 +487,12 @@ test("importResults failed: payable DEĞİŞMEZ; sonraki batch aynı session'lar
   await assertInvariantsClean();
 });
 
-test("boş dönem: hazır eğitmenlerin alacağı kalmadı → payouts 0, held eğitmen görünür kalır", async () => {
+test("boş dönem: hazır eğitmenlerin alacağı kalmadı → payouts 0, BOŞ BATCH açılmaz, held görünür", async () => {
   const b5 = await createBatch(tdb.pool, { periodStart, periodEnd });
   expect(b5.payouts).toBe(0);
   expect(b5.totalCents).toBe(0);
+  expect(b5.batchId).toBeNull(); // ödenecek kimse yok → batch satırı hiç oluşmaz
   expect(b5.heldTeachers).toEqual([{ teacherId: heldTeacher, amountCents: 1_600 }]);
-  expect(await payoutsOfBatch(b5.batchId)).toEqual([]);
   await assertInvariantsClean();
 });
 
@@ -519,4 +524,143 @@ test("teachersMissingPayoutDetails: payout_details NULL olan yalnız AKTİF eği
   );
   const after = await tdb.pool.withPlatform((db) => teachersMissingPayoutDetails(db));
   expect(after.map((t) => t.teacherId)).toEqual([failTeacher]);
+});
+
+// Denetim tur 3: itiraz-iade edilen ders 'settled' kalır ama settle'ı ters kayıtla geri
+// alınmıştır → payout satırı olarak sayılmamalı, yoksa sum(payout_line) ödenen tutarla uyuşmaz.
+test("payout_line: itiraz-iade edilen ders payout satırına GİRMEZ (sum(line)=payable)", async () => {
+  const refundT = await seedTeacher("Deniz Refund", "payout.refund@example.com", true);
+  // daysAgo 8/7: bu plan için henüz kullanılmamış occurrence_key'ler (2–5 dolu), dönem içi.
+  const sA = await settledSession(refundT, { priceCents: 4_000, payCents: 1_600, daysAgo: 8 });
+  const sB = await settledSession(refundT, { priceCents: 4_000, payCents: 1_600, daysAgo: 7 });
+  expect(await balance("teacher", refundT, "teacher_payable")).toBe(3_200);
+
+  // sA'ya itiraz-iade — resolveDispute'un tam kopyası (ters kayıt + hold iade + dispute satırı).
+  await tdb.pool.withPlatform(async (db) => {
+    const s = await db.query<{ slot_id: string; settle_txn_id: string; school_id: string }>(
+      "SELECT slot_id, settle_txn_id, school_id FROM class_session WHERE id = $1",
+      [sA],
+    );
+    const row = s.rows[0]!;
+    const entries = await db.query<{ account_id: string; amount_cents: string }>(
+      "SELECT account_id, amount_cents FROM ledger_entry WHERE txn_id = $1 ORDER BY id",
+      [row.settle_txn_id],
+    );
+    await db.query(
+      "SELECT * FROM post_ledger_txn($1, 'dispute_refund', 'class_session', $2, $3::jsonb, $4, 'dispute')",
+      [
+        `dispute_refund:session:${sA}`,
+        sA,
+        JSON.stringify(
+          entries.rows.map((e) => ({ account_id: e.account_id, amount_cents: -Number(e.amount_cents) })),
+        ),
+        row.settle_txn_id,
+      ],
+    );
+    const holdId = await ensureAccount(db, "school", row.school_id, "wallet_hold");
+    const cashId = await ensureAccount(db, "school", row.school_id, "school_cash");
+    await db.query(
+      "SELECT * FROM post_ledger_txn($1, 'dispute_release', 'class_session', $2, $3::jsonb)",
+      [
+        `dispute_release:session:${sA}`,
+        sA,
+        JSON.stringify([
+          { account_id: holdId, amount_cents: -4_000 },
+          { account_id: cashId, amount_cents: 4_000 },
+        ]),
+      ],
+    );
+    await db.query(
+      `INSERT INTO session_dispute (session_id, school_id, reason, status, resolved_at)
+       VALUES ($1, $2, 'test itiraz', 'resolved_refund', now())`,
+      [sA, row.school_id],
+    );
+  });
+  expect(await balance("teacher", refundT, "teacher_payable")).toBe(1_600); // iade sonrası
+
+  const batch = await createBatch(tdb.pool, { periodStart, periodEnd });
+  const myPayout = (await payoutsOfBatch(batch.batchId!)).find((p) => p.teacher_id === refundT)!;
+  expect(Number(myPayout.amount_cents)).toBe(1_600); // ödenen = güncel bakiye
+  const lines = await linesOfPayout(myPayout.id);
+  expect(lines.map((l) => l.session_id)).toEqual([sB]); // sA (iade edilen) HARİÇ
+  expect(lines.reduce((sum, l) => sum + Number(l.amount_cents), 0)).toBe(1_600); // sum(line)=payable
+  await assertInvariantsClean();
+});
+
+// Denetim tur 3 [P2]: itiraz-iadesi payout ÖDENDİKTEN sonra çözülürse eğitmen dondurulmuş
+// (iade-öncesi) tutarı tam alır → teacher_payable NEGATİFE düşer (min_zero değil). Invariant
+// bunu yakalamaz (trial balance korunur); listOverpaidTeachers borcu admin'e yüzeye çıkarır.
+test("overpayment yüzeye çıkar: payout paid SONRASI iade → negatif payable listelenir", async () => {
+  const opT = await seedTeacher("Ece Overpaid", "payout.overpaid@example.com", true);
+  const sA = await settledSession(opT, { priceCents: 4_000, payCents: 1_600, daysAgo: 6 });
+  await settledSession(opT, { priceCents: 4_000, payCents: 1_600, daysAgo: 1 });
+  expect(await balance("teacher", opT, "teacher_payable")).toBe(3_200);
+
+  // Batch: payout 3200'de DONAR, submitted.
+  const batch = await createBatch(tdb.pool, { periodStart, periodEnd });
+  const payout = (await payoutsOfBatch(batch.batchId!)).find((p) => p.teacher_id === opT)!;
+  expect(Number(payout.amount_cents)).toBe(3_200);
+  await markBatchSubmitted(tdb.pool, batch.batchId!);
+
+  // SONRA sA'ya itiraz-iade → payable 3200 → 1600 (payout hâlâ 3200'de donuk).
+  await tdb.pool.withPlatform(async (db) => {
+    const s = await db.query<{ settle_txn_id: string; school_id: string }>(
+      "SELECT settle_txn_id, school_id FROM class_session WHERE id = $1",
+      [sA],
+    );
+    const row = s.rows[0]!;
+    const entries = await db.query<{ account_id: string; amount_cents: string }>(
+      "SELECT account_id, amount_cents FROM ledger_entry WHERE txn_id = $1 ORDER BY id",
+      [row.settle_txn_id],
+    );
+    await db.query(
+      "SELECT * FROM post_ledger_txn($1, 'dispute_refund', 'class_session', $2, $3::jsonb, $4, 'dispute')",
+      [
+        `dispute_refund:session:${sA}`,
+        sA,
+        JSON.stringify(
+          entries.rows.map((e) => ({ account_id: e.account_id, amount_cents: -Number(e.amount_cents) })),
+        ),
+        row.settle_txn_id,
+      ],
+    );
+    const holdId = await ensureAccount(db, "school", row.school_id, "wallet_hold");
+    const cashId = await ensureAccount(db, "school", row.school_id, "school_cash");
+    await db.query(
+      "SELECT * FROM post_ledger_txn($1, 'dispute_release', 'class_session', $2, $3::jsonb)",
+      [
+        `dispute_release:session:${sA}`,
+        sA,
+        JSON.stringify([
+          { account_id: holdId, amount_cents: -4_000 },
+          { account_id: cashId, amount_cents: 4_000 },
+        ]),
+      ],
+    );
+    // resolveDispute'un yazdığı satır — resolved_refund exclusion × netting etkileşimini de kur.
+    await db.query(
+      `INSERT INTO session_dispute (session_id, school_id, reason, status, resolved_at)
+       VALUES ($1, $2, 'test itiraz', 'resolved_refund', now())`,
+      [sA, row.school_id],
+    );
+  });
+  expect(await balance("teacher", opT, "teacher_payable")).toBe(1_600);
+
+  // Wise sonuç dosyası: DONMUŞ 3200 ödendi → payable = 1600 − 3200 = −1600.
+  expect(
+    await importResults(tdb.pool, batch.batchId!, [
+      {
+        idempotencyKey: payout.provider_idempotency_key,
+        externalRef: "WISE-OVERPAID",
+        status: "paid",
+      },
+    ]),
+  ).toEqual({ paid: 1, failed: 0, warnings: [] });
+  expect(await balance("teacher", opT, "teacher_payable")).toBe(-1_600);
+
+  // Invariant NEGATİFİ yakalamaz (trial balance korunur) — görünürlük burada:
+  await assertInvariantsClean();
+  const overpaid = await tdb.pool.withPlatform((db) => listOverpaidTeachers(db));
+  const mine = overpaid.find((o) => o.teacherId === opT)!;
+  expect(mine).toMatchObject({ name: "Ece Overpaid", owedCents: 1_600 });
 });

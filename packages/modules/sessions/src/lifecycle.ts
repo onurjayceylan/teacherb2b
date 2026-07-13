@@ -17,12 +17,16 @@ export interface EnsureSessionResult {
  * UNIQUE(slot_id) + ON CONFLICT DO NOTHING → eşzamanlı iki çağrı aynı oturumu paylaşır.
  */
 export async function ensureSessionForSlot(db: Db, slotId: string): Promise<EnsureSessionResult> {
+  // Slot FOR UPDATE: oturum oluşturma/senkronu, drop/iptal (slot kilidi) ve startSession ile
+  // AYNI booking_slot kilidinde serileşir → yarış (drop sırasında oturum doğması) kapanır.
   const slotRes = await db.query<{
     id: string;
     school_id: string;
     class_group_id: string;
     status: string;
-  }>("SELECT id, school_id, class_group_id, status FROM booking_slot WHERE id = $1", [slotId]);
+  }>("SELECT id, school_id, class_group_id, status FROM booking_slot WHERE id = $1 FOR UPDATE", [
+    slotId,
+  ]);
   const slot = slotRes.rows[0];
   if (!slot) throw new Error(`ensureSessionForSlot: slot bulunamadı: ${slotId}`);
   if (slot.status !== "scheduled") {
@@ -48,12 +52,22 @@ export async function ensureSessionForSlot(db: Db, slotId: string): Promise<Ensu
   const createdRow = inserted.rows[0];
   if (createdRow) return { sessionId: createdRow.id, created: true };
 
-  const existing = await db.query<{ id: string }>(
-    "SELECT id FROM class_session WHERE slot_id = $1",
+  // Mevcut oturum: teklif-tekrarı (drop→re-offer) confirmed eğitmeni DEĞİŞTİRMİŞ olabilir ama
+  // oturum eski eğitmende kalır (ON CONFLICT DO NOTHING güncellemez) → settle YANLIŞ eğitmene
+  // öderdi. Henüz başlamamış ('created') oturumun eğitmenini güncel confirmed atamaya senkronla;
+  // başlamış/bitmiş oturuma DOKUNMA (o zaten guard'larla korunuyor).
+  const existing = await db.query<{ id: string; teacher_id: string; status: string }>(
+    "SELECT id, teacher_id, status FROM class_session WHERE slot_id = $1",
     [slotId],
   );
   const row = existing.rows[0];
   if (!row) throw new Error(`ensureSessionForSlot: oturum bulunamadı (slot=${slotId})`);
+  if (row.status === "created" && row.teacher_id !== teacherId) {
+    await db.query("UPDATE class_session SET teacher_id = $2, updated_at = now() WHERE id = $1", [
+      row.id,
+      teacherId,
+    ]);
+  }
   return { sessionId: row.id, created: false };
 }
 
@@ -93,16 +107,32 @@ export async function startSession(
   sessionId: string,
   opts: { now?: Date } = {},
 ): Promise<StartSessionResult> {
-  const res = await db.query<{ status: string; starts_at: Date; ends_at: Date }>(
-    `SELECT cs.status, bs.starts_at, bs.ends_at
+  // FOR UPDATE OF bs (session değil SLOT kilidi): drop/iptal (getSlotForUpdate) ve
+  // ensureSessionForSlot ile AYNI booking_slot kilidinde serileşir. Böylece "drop reads
+  // session='created' → başka tx start eder" yarışı kapanır: start slot kilidini bekler,
+  // drop commit edince slot 'scheduled' olmadığı için start reddedilir (ve tersi).
+  const res = await db.query<{
+    status: string;
+    slot_status: string;
+    starts_at: Date;
+    ends_at: Date;
+  }>(
+    `SELECT cs.status, bs.status AS slot_status, bs.starts_at, bs.ends_at
        FROM class_session cs
        JOIN booking_slot bs ON bs.id = cs.slot_id
       WHERE cs.id = $1
-      FOR UPDATE OF cs`,
+      FOR UPDATE OF bs`,
     [sessionId],
   );
   const row = res.rows[0];
   if (!row) throw new Error(`startSession: oturum bulunamadı: ${sessionId}`);
+  // Slot iptal/tamamlanmışsa (ör. eğitmen dersi bıraktı → cancelled_teacher) ders
+  // başlatılamaz: aksi hâlde iptal edilmiş slota bağlı orphan 'started' oturum doğardı.
+  // Idempotent 'already started' cevabından ÖNCE kontrol et — iptal olmuş slotta
+  // yanlışlıkla alreadyStarted dönmeyelim.
+  if (row.slot_status !== "scheduled") {
+    throw new Error(`startSession: ders artık aktif değil (slot: ${row.slot_status})`);
+  }
   if (row.status === "started") return { alreadyStarted: true };
   if (row.status !== "created") {
     throw new Error(`startSession: yalnız 'created' oturum başlatılabilir (${row.status})`);

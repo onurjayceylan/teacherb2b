@@ -61,6 +61,16 @@ async function sessionRow(
   });
 }
 
+async function sessionTeacher(sessionId: string): Promise<string> {
+  return tdb.pool.withPlatform(async (db) => {
+    const res = await db.query<{ teacher_id: string }>(
+      "SELECT teacher_id FROM class_session WHERE id = $1",
+      [sessionId],
+    );
+    return res.rows[0]!.teacher_id;
+  });
+}
+
 async function reviewAuditCount(sessionId: string): Promise<number> {
   return tdb.pool.withPlatform(async (db) => {
     const res = await db.query<{ n: string }>(
@@ -112,6 +122,34 @@ test("start penceresi: 15 dk'dan erken RED, pencere içi OK, bitiş+2 saat sonra
   expect((await sessionRow(sessionId)).status).toBe("started");
 });
 
+test("start guard'ı: slot iptal edildiyse (cancelled_teacher) ders başlatılamaz — orphan önlenir", async () => {
+  const ctx = await seedCtx("t_slotguard");
+  const startsAt = minutesFromNow(60);
+  const endsAt = new Date(startsAt.getTime() + 45 * 60_000);
+  const slotId = await createHeldSlot(tdb.pool, {
+    seed: ctx.seed,
+    planId: ctx.planId,
+    poolId: ctx.poolId,
+    occurrenceKey: "2026-03-09",
+    startsAt,
+    endsAt,
+    teacherId: ctx.teacherId,
+  });
+  const { sessionId } = await tdb.pool.withPlatform((db) => ensureSessionForSlot(db, slotId));
+
+  // Slot bu arada iptal edildi (ör. yarışan drop) → 'scheduled' değil.
+  await tdb.pool.withPlatform((db) =>
+    db.query("UPDATE booking_slot SET status = 'cancelled_teacher' WHERE id = $1", [slotId]),
+  );
+
+  await expect(
+    tdb.pool.withPlatform((db) =>
+      startSession(db, sessionId, { now: new Date(startsAt.getTime() - 5 * 60_000) }),
+    ),
+  ).rejects.toThrow(/artık aktif değil \(slot: cancelled_teacher\)/);
+  expect((await sessionRow(sessionId)).status).toBe("created"); // start olmadı
+});
+
 test("kısa ders: settle PARA OYNATMAZ → reviewRequired; force:true admin onayıyla settle eder", async () => {
   const ctx = await seedCtx("t2");
   const startsAt = minutesFromNow(-120);
@@ -142,7 +180,7 @@ test("kısa ders: settle PARA OYNATMAZ → reviewRequired; force:true admin onay
   // settle → review kuyruğu, PARA HAREKETİ YOK
   const result = await settleSession(tdb.pool, sessionId);
   expect(result.reviewRequired).toBe(true);
-  expect(result.reason).toMatch(/kısa ders: 2 dk \(planlanan 45 dk\)/);
+  expect(result.reason).toMatch(/short lesson: 2 min \(planned 45 min\)/);
   expect(result.txnId).toBeUndefined();
 
   expect(await balance(tdb.pool, "school", ctx.seed.schoolId, "wallet_hold")).toBe(before.hold);
@@ -152,7 +190,7 @@ test("kısa ders: settle PARA OYNATMAZ → reviewRequired; force:true admin onay
   const row = await sessionRow(sessionId);
   expect(row.status).toBe("ended"); // settled DEĞİL
   expect(row.review_required).toBe(true);
-  expect(row.review_reason).toMatch(/kısa ders/);
+  expect(row.review_reason).toMatch(/short lesson/);
   expect(await reviewAuditCount(sessionId)).toBe(1);
 
   // tekrar deneme: yine review, ama audit şişmez
@@ -210,9 +248,9 @@ test("erken başlatma guard'ı (eski/yarış verisi): started_at pencere öncesi
 
   const result = await settleSession(tdb.pool, sessionId);
   expect(result.reviewRequired).toBe(true);
-  expect(result.reason).toMatch(/erken başlatma/);
+  expect(result.reason).toMatch(/early start/);
   // dosaj yeterli (60 dk) — yalnız erken başlatma nedeni yazılır
-  expect(result.reason).not.toMatch(/kısa ders/);
+  expect(result.reason).not.toMatch(/short lesson/);
   expect(await balance(tdb.pool, "school", ctx.seed.schoolId, "wallet_hold")).toBe(4_000);
   expect(await reviewAuditCount(sessionId)).toBe(1);
 
@@ -251,5 +289,57 @@ test("normal süreli ders eskisi gibi OTOMATİK settle olur (force gerekmez)", a
 
   const row = await sessionRow(sessionId);
   expect(row).toEqual({ status: "settled", review_required: false, review_reason: null });
+  await assertInvariantsClean(tdb.pool);
+});
+
+// NOT: settle ederek paylaşılan platform_revenue toplamına eklediği için EN SONA konur
+// (yukarıdaki testler mutlak platform_revenue toplamına dayanıyor).
+test("teklif-tekrarı (drop→re-offer): ensureSessionForSlot eğitmeni senkronlar → settle DOĞRU eğitmene öder", async () => {
+  const ctx = await seedCtx("t_resync");
+  const t2 = await seedTeacher(tdb.pool, "window.resync2@example.com");
+  const startsAt = minutesFromNow(-90); // geçmişte → start/end/settle bu testte koşabilir
+  const endsAt = new Date(startsAt.getTime() + 60 * 60_000);
+  const slotId = await createHeldSlot(tdb.pool, {
+    seed: ctx.seed,
+    planId: ctx.planId,
+    poolId: ctx.poolId,
+    occurrenceKey: "2026-03-11",
+    startsAt,
+    endsAt,
+    teacherId: ctx.teacherId, // T1 confirmed
+  });
+
+  // Oda ilk açılış: oturum T1'e kurulur.
+  const first = await tdb.pool.withPlatform((db) => ensureSessionForSlot(db, slotId));
+  expect(await sessionTeacher(first.sessionId)).toBe(ctx.teacherId);
+
+  // Dispatch teacherDrop→re-offer'ın bıraktığı durum: T1 dropped, T2 confirmed.
+  await tdb.pool.withPlatform(async (db) => {
+    await db.query("UPDATE assignment SET status = 'dropped' WHERE slot_id = $1 AND teacher_id = $2", [
+      slotId,
+      ctx.teacherId,
+    ]);
+    await db.query(
+      `INSERT INTO assignment (slot_id, teacher_id, status, starts_at, ends_at)
+       VALUES ($1, $2, 'confirmed', $3, $4)`,
+      [slotId, t2, startsAt, endsAt],
+    );
+  });
+
+  // Oda tekrar açılınca aynı oturum döner AMA eğitmen T2'ye senkronlanır.
+  const second = await tdb.pool.withPlatform((db) => ensureSessionForSlot(db, slotId));
+  expect(second.sessionId).toBe(first.sessionId);
+  expect(second.created).toBe(false);
+  expect(await sessionTeacher(first.sessionId)).toBe(t2);
+
+  // UÇTAN UCA KANIT: start→end→settle sonrası PARA T2'ye (dersi veren) gider, T1'e DEĞİL.
+  await tdb.pool.withPlatform((db) => startSession(db, first.sessionId, { now: startsAt }));
+  await tdb.pool.withPlatform((db) =>
+    endSession(db, first.sessionId, { now: new Date(startsAt.getTime() + 60 * 60_000) }),
+  );
+  const settled = await settleSession(tdb.pool, first.sessionId);
+  expect(settled.alreadySettled).toBe(false);
+  expect(await balance(tdb.pool, "teacher", t2, "teacher_payable")).toBe(1_600);
+  expect(await balance(tdb.pool, "teacher", ctx.teacherId, "teacher_payable")).toBe(0);
   await assertInvariantsClean(tdb.pool);
 });

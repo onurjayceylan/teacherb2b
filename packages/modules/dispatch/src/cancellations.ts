@@ -49,6 +49,30 @@ export async function releaseHold(db: Db, slot: SlotRow, reason: string): Promis
   return txnId;
 }
 
+/**
+ * Ders BAŞLAMIŞSA (class_session 'started' | 'ended' | 'settled') slot artık iptal/drop
+ * EDİLEMEZ: eğitmen emeği harcandı ve/veya para mekaniği akışta. Kritik nokta — settle'a
+ * kadar (ya da review reddine kadar) slot 'scheduled' KALIR, yani slot.status guard'ı tek
+ * başına yetmez: review kuyruğundaki 'ended' ders scheduled görünür ama düşürülürse okula
+ * haksız hold iadesi çıkar + eğitmenin dersi kalıcı ödenemez orphan olur.
+ *
+ * Okuma bilinçli olarak KİLİTSİZ ama YARIŞSIZDIR: 'created→started' geçişi (lessonHasBegun'ı
+ * false→true çeviren TEK geçiş) startSession içinde booking_slot FOR UPDATE altında yapılır ve
+ * ensureSessionForSlot de slotu kilitler. Çağıran zaten slotu FOR UPDATE tutar; dolayısıyla bu
+ * okuma sırasında eşzamanlı bir start commit EDEMEZ (start slot kilidini bekler). Buraya bir
+ * session FOR UPDATE eklemek settle/void/dispute'un session→slot sırasıyla ters düşerdi; slotu
+ * ortak kilit noktası yaparak hem yarışı kapatıp hem o kilit-sırası çakışmasından kaçınıyoruz.
+ */
+async function lessonHasBegun(db: Db, slotId: string): Promise<boolean> {
+  const res = await db.query<{ status: string }>(
+    "SELECT status FROM class_session WHERE slot_id = $1",
+    [slotId],
+  );
+  const status = res.rows[0]?.status;
+  // 'created' = oda açıldı ama ders başlamadı → hâlâ droppable (emek/para yok).
+  return status !== undefined && status !== "created";
+}
+
 interface LiveAssignment {
   teacherId: string;
   /** iptal ANINDAKİ durum: 'offered' | 'confirmed' */
@@ -132,6 +156,11 @@ export async function cancelBySchool(
     }
     if (slot.starts_at.getTime() <= now.getTime()) {
       throw new Error("cancelBySchool: başlamış ders iptal edilemez");
+    }
+    // Erken-start (starts_at'ten en fazla 15 dk önce) penceresinde ders zaten
+    // başlamış/bitmiş olabilir; slot 'scheduled' + starts_at gelecekte olsa bile.
+    if (await lessonHasBegun(db, slot.id)) {
+      throw new Error("cancelBySchool: ders başlamış — iptal edilemez (destek ile iletişime geçin)");
     }
 
     const live = await cancelLiveAssignment(db, slot.id);
@@ -233,6 +262,12 @@ export async function teacherDrop(
     if (slot.status !== "scheduled") {
       throw new Error(`teacherDrop: slot scheduled değil (${slot.status})`);
     }
+    // Başlamış/verilmiş dersi düşürmek yasak — mesaj eğitmen-yüzlü (İngilizce).
+    if (await lessonHasBegun(db, slot.id)) {
+      throw new Error(
+        "this lesson has already started and can no longer be dropped — contact support",
+      );
+    }
 
     // Slot başına tek canlı atama (assignment_active_per_slot) — tek satır beklenir.
     const confirmed = await db.query<{ id: string; teacher_id: string }>(
@@ -319,6 +354,10 @@ export async function teacherNoShow(
     if (!slot) throw new Error(`teacherNoShow: slot bulunamadı: ${input.slotId}`);
     if (slot.status !== "scheduled") {
       throw new Error(`teacherNoShow: slot scheduled değil (${slot.status})`);
+    }
+    // Ders başlamışsa "gelmedi" olamaz — no-show iadesi+strike haksız olurdu.
+    if (await lessonHasBegun(db, slot.id)) {
+      throw new Error("teacherNoShow: ders başlamış — no-show işaretlenemez");
     }
 
     const cancelled = await db.query<{ teacher_id: string }>(
