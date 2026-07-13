@@ -79,6 +79,44 @@ export async function retryBlockedSlots(
   return result;
 }
 
+export interface ExpireBlockedResult {
+  /** geçmiş-tarihli olduğu için 'expired_blocked'a çekilen slot sayısı */
+  expired: number;
+}
+
+/**
+ * Geçmiş-tarihli (starts_at <= now) 'blocked_insufficient_funds' slotları terminal
+ * 'expired_blocked'a çeker: ders günü geçti, bakiye geç geldi → ders artık YAPILAMAZ, slot
+ * sonsuza dek stranded kalmasın. Bloke slotta HOLD YOKTUR → para OYNAMAZ; yine de defensive
+ * olarak yalnız hold_txn_id IS NULL olanlar kapatılır (beklenmedik biçimde hold'lu bir bloke
+ * slot varsa DOKUNULMAZ — elle incelenir, para stranded edilmez). Her kapanış audit'lenir.
+ */
+export async function expirePastBlockedSlots(
+  pool: ActorPool,
+  opts: RetryBlockedOptions = {},
+): Promise<ExpireBlockedResult> {
+  const now = opts.now ?? new Date();
+  return pool.withPlatform(async (db) => {
+    const res = await db.query<{ id: string; school_id: string }>(
+      `UPDATE booking_slot
+          SET status = 'expired_blocked', updated_at = now()
+        WHERE status = 'blocked_insufficient_funds'
+          AND starts_at <= $1
+          AND hold_txn_id IS NULL
+        RETURNING id, school_id`,
+      [now],
+    );
+    for (const row of res.rows) {
+      await db.query(
+        `INSERT INTO audit_log (actor_kind, school_id, action, entity_type, entity_id, after)
+         VALUES ('system', $1, 'slot_expired_blocked', 'booking_slot', $2, $3::jsonb)`,
+        [row.school_id, row.id, JSON.stringify({ reason: "past_dated_blocked" })],
+      );
+    }
+    return { expired: res.rows.length };
+  });
+}
+
 type RetryOutcome = "offered" | "unblocked" | "skipped";
 
 async function retrySlot(db: Db, slotId: string, now: Date): Promise<RetryOutcome> {

@@ -41,7 +41,9 @@ export {
 } from "./backfill.js";
 export {
   retryBlockedSlots,
+  expirePastBlockedSlots,
   type RetryBlockedOptions,
   type RetryBlockedResult,
+  type ExpireBlockedResult,
 } from "./retry-blocked.js";
 export { getSlot, getSlotForUpdate, type SlotRow } from "./slots.js";

@@ -38,6 +38,8 @@ interface Plan {
   totalSlots: number;
   scheduledCount: number;
   blockedCount: number;
+  // Denetim tur 3: ders günü geçtiği için 'expired_blocked'a çekilen (bakiye geç gelen) slotlar.
+  expiredCount: number;
   // P1-H: okulun Zoom/Meet linki — ders odası, eğitmen ve projeksiyon sayfası bunu gösterir.
   lessonLink: string | null;
 }
@@ -574,6 +576,15 @@ export default function ProgramPage() {
                           title="Bakiye yükleyip onaylandığında bloke dersler ~10 dakika içinde otomatik yeniden denenir."
                         >
                           {p.blockedCount} bloke
+                        </span>
+                      ) : null}
+                      {p.expiredCount > 0 ? (
+                        <span
+                          className="badge"
+                          style={{ marginLeft: "0.35rem" }}
+                          title="Bakiye ders gününden sonra geldiği için bu dersler yapılamadı (ücret alınmadı)."
+                        >
+                          {p.expiredCount} süresi doldu
                         </span>
                       ) : null}
                     </td>

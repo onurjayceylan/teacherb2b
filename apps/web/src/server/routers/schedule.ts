@@ -147,6 +147,7 @@ export const scheduleRouter = router({
         total_slots: string;
         scheduled_count: string;
         blocked_count: string;
+        expired_count: string;
       }>(
         `SELECT p.id, p.class_group_id, p.pool_id, p.weekday, p.start_minute, p.duration_min,
                 p.school_tz,
@@ -155,7 +156,8 @@ export const scheduleRouter = router({
                 cg.name AS class_name, pl.name AS pool_name,
                 count(s.id) AS total_slots,
                 count(s.id) FILTER (WHERE s.status = 'scheduled') AS scheduled_count,
-                count(s.id) FILTER (WHERE s.status = 'blocked_insufficient_funds') AS blocked_count
+                count(s.id) FILTER (WHERE s.status = 'blocked_insufficient_funds') AS blocked_count,
+                count(s.id) FILTER (WHERE s.status = 'expired_blocked') AS expired_count
            FROM dosage_plan p
            LEFT JOIN class_group cg ON cg.id = p.class_group_id
            LEFT JOIN pool pl ON pl.id = p.pool_id
@@ -182,6 +184,7 @@ export const scheduleRouter = router({
         totalSlots: Number(r.total_slots),
         scheduledCount: Number(r.scheduled_count),
         blockedCount: Number(r.blocked_count),
+        expiredCount: Number(r.expired_count),
       }));
     });
   }),

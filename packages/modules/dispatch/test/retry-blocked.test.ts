@@ -4,7 +4,7 @@
 // Testler sıralı bir hikâye anlatır: aynı okulun durumu testler arasında taşınır.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDb, type TestDb } from "@teachernow/db";
-import { materializePlans, retryBlockedSlots } from "../src/index.js";
+import { expirePastBlockedSlots, materializePlans, retryBlockedSlots } from "../src/index.js";
 import {
   allWeekAvailability,
   assertInvariantsClean,
@@ -228,6 +228,69 @@ describe("retryBlockedSlots", () => {
     expect((await planSlots(planB))[1]!.status).toBe("scheduled");
     expect(await balance(tdb.pool, "school", schoolB, "school_cash")).toBe(0);
     expect(await balance(tdb.pool, "school", schoolB, "wallet_hold")).toBe(2 * PRICE);
+    await assertInvariantsClean(tdb.pool);
+  });
+});
+
+describe("expirePastBlockedSlots", () => {
+  it("ders günü geçen bloke slot 'expired_blocked'a çekilir; gelecek olan DOKUNULMAZ", async () => {
+    const c = await seedSchool(tdb.pool, "Expire Okul C");
+    const schoolC = c.schoolId;
+    const poolId = await seedPool(tdb.pool, "expire_pool_c");
+    const start = futureDate(TZ, 3);
+    const planC = await seedPlan(tdb.pool, {
+      schoolId: schoolC,
+      classGroupId: c.classGroupId,
+      poolId,
+      weekday: start.weekday,
+      startMinute: 720,
+      durationMin: 60,
+      schoolTz: TZ,
+      priceCents: PRICE,
+      teacherPayCents: 6_000,
+      startDate: start.dateISO,
+      weeks: 2,
+    });
+    // Bakiyesiz → iki occurrence da bloke (hold YOK).
+    expect(await materializePlans(tdb.pool)).toEqual({ created: 0, blocked: 2, skipped: 0 });
+    await completePlan(tdb.pool, planC);
+    const slots = await planSlots(planC);
+    expect(slots).toHaveLength(2);
+
+    // now İLK slottan ÖNCE → hiçbiri süresi dolmaz (henüz ders günü gelmedi).
+    const beforeAll = new Date(slots[0]!.starts_at.getTime() - 60_000);
+    expect(await expirePastBlockedSlots(tdb.pool, { now: beforeAll })).toEqual({ expired: 0 });
+    expect((await planSlots(planC)).map((s) => s.status)).toEqual([
+      "blocked_insufficient_funds",
+      "blocked_insufficient_funds",
+    ]);
+
+    // now İLK slottan SONRA ama ikinciden önce → yalnız ilki expired olur.
+    const afterFirst = new Date(slots[0]!.starts_at.getTime() + 60_000);
+    expect(await expirePastBlockedSlots(tdb.pool, { now: afterFirst })).toEqual({ expired: 1 });
+    const afterFirstSlots = await planSlots(planC);
+    expect(afterFirstSlots[0]!.status).toBe("expired_blocked");
+    expect(afterFirstSlots[1]!.status).toBe("blocked_insufficient_funds");
+
+    // Audit izi düştü; para OYNAMADI (bloke slotta hold yoktu).
+    await tdb.pool.withPlatform(async (db) => {
+      const audit = await db.query(
+        "SELECT 1 FROM audit_log WHERE action = 'slot_expired_blocked' AND entity_id = $1",
+        [afterFirstSlots[0]!.id],
+      );
+      expect(audit.rowCount).toBe(1);
+    });
+    expect(await balance(tdb.pool, "school", schoolC, "school_cash")).toBe(0);
+    expect(await balance(tdb.pool, "school", schoolC, "wallet_hold")).toBe(0);
+
+    // İkinci slot da geçince expired; sonra idempotent (tekrar 0).
+    const afterBoth = new Date(slots[1]!.starts_at.getTime() + 60_000);
+    expect(await expirePastBlockedSlots(tdb.pool, { now: afterBoth })).toEqual({ expired: 1 });
+    expect(await expirePastBlockedSlots(tdb.pool, { now: afterBoth })).toEqual({ expired: 0 });
+    expect((await planSlots(planC)).map((s) => s.status)).toEqual([
+      "expired_blocked",
+      "expired_blocked",
+    ]);
     await assertInvariantsClean(tdb.pool);
   });
 });

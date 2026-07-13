@@ -5,6 +5,7 @@
 // heartbeat result'ı iki adımın sayaçlarını birlikte taşır.
 import type { ActorPool } from "@teachernow/db";
 import {
+  expirePastBlockedSlots,
   retryBlockedSlots,
   sweepBackfill,
   type SweepBackfillResult,
@@ -15,11 +16,20 @@ export interface BackfillJobResult extends SweepBackfillResult {
   retried: number;
   /** retryBlockedSlots: bakiye yetmediği için bloke kalan slot sayısı */
   stillBlocked: number;
+  /** expirePastBlockedSlots: ders günü geçtiği için 'expired_blocked'a çekilen slot sayısı */
+  expiredBlocked: number;
 }
 
 export async function runBackfillSweep(pool: ActorPool): Promise<BackfillJobResult> {
   // Önce bloke slot retry'ı: açılan slot aynı koşumun sweep'ine 'scheduled' olarak girer.
   const retry = await retryBlockedSlots(pool);
+  // Sonra geçmiş-tarihli (denenmeyen) bloke slotları terminal 'expired_blocked'a çek.
+  const expired = await expirePastBlockedSlots(pool);
   const sweep = await sweepBackfill(pool);
-  return { ...sweep, retried: retry.retried, stillBlocked: retry.stillBlocked };
+  return {
+    ...sweep,
+    retried: retry.retried,
+    stillBlocked: retry.stillBlocked,
+    expiredBlocked: expired.expired,
+  };
 }

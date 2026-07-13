@@ -78,6 +78,7 @@ test("backfill-sweeper job'ı: SLA penceresindeki atanmamış slot escalate edil
     escalated: 1,
     retried: 0,
     stillBlocked: 0,
+    expiredBlocked: 0,
   });
 
   await tdb.pool.withPlatform(async (db) => {
@@ -100,6 +101,7 @@ test("backfill-sweeper job'ı: SLA penceresindeki atanmamış slot escalate edil
     escalated: 0,
     retried: 0,
     stillBlocked: 0,
+    expiredBlocked: 0,
   });
 });
 
