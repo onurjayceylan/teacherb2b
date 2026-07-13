@@ -745,3 +745,272 @@ td button {
     background: rgba(255, 255, 255, 0.22);
   }
 }
+
+/* ============================================================
+   Tanıtım (landing) — .lp-* sınıfları. Tema değişkenlerini (var(--*))
+   kullanır → dark mode çoğunlukla otomatik; birkaç hedefli override altta.
+   ============================================================ */
+.lp {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* ---- hero ---- */
+.lp-hero {
+  text-align: center;
+  padding: 3.4rem 1rem 2.2rem;
+}
+.lp-eyebrow {
+  display: inline-block;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--accent-deep);
+  background: var(--info-tint);
+  border: 1px solid var(--hairline);
+  padding: 0.32rem 0.85rem;
+  border-radius: 999px;
+  margin-bottom: 1rem;
+}
+.lp-hero h1 {
+  font-size: clamp(2rem, 6vw, 3.1rem);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  max-width: 22ch;
+  margin: 0 auto 0.9rem;
+  color: var(--ink);
+}
+.lp-accent {
+  background: linear-gradient(115deg, #0a7cff 10%, #8a5cff 95%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.lp-sub {
+  max-width: 40rem;
+  margin: 0 auto 1.5rem;
+  font-size: clamp(1rem, 2.4vw, 1.18rem);
+  line-height: 1.6;
+  color: var(--muted);
+}
+.lp-note {
+  margin-top: 1rem;
+  font-size: 0.86rem;
+}
+
+/* ---- CTA satırı + düğmeler (anchor) ---- */
+.lp-cta-row {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-weight: 600;
+  padding: 0.72rem 1.4rem;
+  border-radius: 999px;
+  color: #fff;
+  background: linear-gradient(180deg, #47a4ff 0%, var(--accent) 55%, #0070ea 100%);
+  box-shadow: 0 12px 26px -12px rgba(10, 124, 255, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+.lp-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 32px -12px rgba(10, 124, 255, 0.8), inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+.lp-btn.ghost {
+  color: var(--accent-deep);
+  background: var(--glass-fill);
+  border: 1px solid var(--hairline);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.35);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+}
+
+/* ---- bölümler ---- */
+.lp-section {
+  margin: 2.4rem 0;
+}
+.lp-section > h2 {
+  text-align: center;
+  font-size: clamp(1.5rem, 4vw, 2rem);
+  letter-spacing: -0.028em;
+  max-width: 24ch;
+  margin: 0 auto 1.5rem;
+  color: var(--ink);
+}
+.lp-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+}
+.lp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15.5rem, 1fr));
+  gap: 0.9rem;
+}
+.lp-grid .card h3,
+.lp-two .card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1.08rem;
+}
+
+/* ---- adımlar ---- */
+.lp-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.9rem;
+  counter-reset: none;
+}
+.lp-steps li {
+  display: flex;
+  gap: 0.8rem;
+  align-items: flex-start;
+  background: var(--glass-fill);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-lg);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--glass-shadow);
+}
+.lp-steps h3 {
+  margin: 0 0 0.25rem;
+  font-size: 1.02rem;
+}
+.lp-steps p {
+  margin: 0;
+}
+.lp-step-n {
+  flex: 0 0 auto;
+  width: 2rem;
+  height: 2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, #41a6ff 0%, #0a7cff 55%, #8a5cff 120%);
+  box-shadow: 0 8px 18px -8px rgba(10, 124, 255, 0.7);
+}
+
+/* ---- SSS (details/summary) ---- */
+.lp-faq {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-width: 46rem;
+  margin: 0 auto;
+}
+.lp-faq details {
+  padding: 0;
+}
+.lp-faq summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 1rem 1.15rem;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.lp-faq summary::-webkit-details-marker {
+  display: none;
+}
+.lp-faq summary::after {
+  content: "+";
+  font-weight: 400;
+  font-size: 1.3rem;
+  color: var(--accent-deep);
+  transition: transform 0.15s ease;
+}
+.lp-faq details[open] summary::after {
+  transform: rotate(45deg);
+}
+.lp-faq details > p {
+  margin: 0;
+  padding: 0 1.15rem 1.1rem;
+  line-height: 1.6;
+}
+
+/* ---- son CTA + footer ---- */
+.lp-final-card {
+  text-align: center;
+  padding: 2.2rem 1.4rem;
+}
+.lp-final-card h2 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.4rem, 3.6vw, 1.9rem);
+  letter-spacing: -0.026em;
+}
+.lp-final-card .lp-cta-row {
+  margin-top: 1.2rem;
+}
+.lp-footer {
+  margin: 2.6rem 0 1rem;
+  padding-top: 1.4rem;
+  border-top: 1px solid var(--hairline);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1.2rem;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.lp-footer p {
+  margin: 0;
+}
+.lp-footer nav {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.lp-footer a {
+  color: var(--muted);
+}
+.lp-footer a:hover {
+  color: var(--accent-deep);
+}
+
+/* ---- nav CTA hap ---- */
+.topbar a.nav-cta {
+  color: #fff;
+  background: linear-gradient(180deg, #47a4ff 0%, var(--accent) 60%, #0070ea 100%);
+  box-shadow: 0 8px 18px -10px rgba(10, 124, 255, 0.75);
+}
+.topbar a.nav-cta:hover {
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+@media (max-width: 640px) {
+  .lp-two {
+    grid-template-columns: 1fr;
+  }
+  .lp-hero {
+    padding: 2.4rem 0.5rem 1.6rem;
+  }
+}
+
+/* ---- landing dark mode hedefli düzeltmeler ---- */
+@media (prefers-color-scheme: dark) {
+  .lp-accent {
+    background: linear-gradient(115deg, #4aa3ff 10%, #a98cff 95%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lp-steps li,
+  .lp-faq details {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+}

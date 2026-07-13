@@ -4,9 +4,25 @@ import "./globals.css";
 import { LangScope } from "./lang-scope";
 import { TopNav } from "./top-nav";
 
+const SITE_URL = (process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3010").replace(/\/+$/, "");
+
 export const metadata: Metadata = {
-  title: { default: "Teachernow", template: "%s — Teachernow" },
-  description: "Okullar için eğitmen operasyon platformu — speaking club dersleri, tek panelden.",
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: "Teachernow — okullara native İngilizce konuşma kulübü",
+    template: "%s — Teachernow",
+  },
+  description:
+    "Okullar için eğitmen dispatch platformu: doğrulanmış native İngilizce eğitmen havuzu, otomatik ders planlama ve SLA garantili yedekleme — tek panelden. Türkiye, MENA ve ABD.",
+  applicationName: "Teachernow",
+  authors: [{ name: "Teachernow" }],
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: { index: true, follow: true, "max-image-preview": "large", "max-snippet": -1 },
+  },
+  openGraph: { type: "website", siteName: "Teachernow", locale: "tr_TR", url: SITE_URL },
+  twitter: { card: "summary_large_image" },
 };
 
 export const viewport: Viewport = {

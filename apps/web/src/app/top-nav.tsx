@@ -22,6 +22,9 @@ export function TopNav() {
           <Link href="/okul">Okul</Link>
           <Link href="/baslangic">Başlangıç</Link>
           <Link href="/admin">Admin</Link>
+          <Link className="nav-cta" href="/giris">
+            Giriş
+          </Link>
         </>
       )}
     </nav>
