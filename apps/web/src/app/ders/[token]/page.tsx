@@ -421,7 +421,8 @@ export default function DersPage() {
 
       {done && !finished ? (
         <div className="card">
-          <h2>Lesson completed</h2>
+          {/* Başlık durumla tutarlı olmalı: review'da "completed" demek çelişki (denetim tur 3). */}
+          <h2>{room.sessionStatus === "settled" ? "Lesson completed" : "Lesson ended"}</h2>
           {room.sessionStatus === "settled" ? (
             <>
               <p style={{ marginTop: 0 }}>

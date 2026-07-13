@@ -92,6 +92,30 @@ export const scheduleRouter = router({
         );
         const row = ins.rows[0];
         if (!row) throw new Error("createPlan: RPC satır dönmedi");
+        // Çift-rezerv guard (denetim tur 3): aynı sınıf+gün+zaman-aralığında BAŞKA aktif plan
+        // varsa engelle — bir sınıf aynı anda iki derste olamaz; iki slot/iki hold/iki teklif
+        // çift-ücret olurdu. Kontrol INSERT'ten SONRA yapılır (çözülmüş duration_min ile);
+        // çakışma bulunursa withSchoolDb transaction'ı geri sarılır → plan yazılmamış olur.
+        const conflict = await db.query(
+          `SELECT 1
+             FROM dosage_plan p1
+             JOIN dosage_plan p2
+               ON p2.id <> p1.id
+              AND p2.class_group_id = p1.class_group_id
+              AND p2.weekday = p1.weekday
+              AND p2.status = 'active'
+              AND p2.start_minute < p1.start_minute + p1.duration_min
+              AND p1.start_minute < p2.start_minute + p2.duration_min
+            WHERE p1.id = $1`,
+          [row.id],
+        );
+        if (conflict.rows[0]) {
+          throw new TRPCError({
+            code: "CONFLICT",
+            message:
+              "Bu sınıfın bu gün ve saatinde zaten aktif bir ders planı var — çift rezervasyon engellendi.",
+          });
+        }
         return row.id;
       });
 
@@ -243,6 +267,23 @@ export const scheduleRouter = router({
           const cgRow = cg.rows[0];
           if (!cgRow) {
             out.push({ classGroupId: cgId, className: "—", planId: null, error: "sınıf bulunamadı" });
+            continue;
+          }
+          // Çift-rezerv guard (denetim tur 3): hedef sınıfta aynı gün+zaman-aralığında aktif plan
+          // varsa bu sınıfı ATLA (batch'i komple düşürmeden — RAISE transaction'ı zehirlerdi).
+          const conflict = await db.query(
+            `SELECT 1 FROM dosage_plan
+              WHERE class_group_id = $1 AND weekday = $2 AND status = 'active'
+                AND start_minute < $3 + $4 AND $3 < start_minute + duration_min`,
+            [cgId, src.weekday, src.start_minute, src.duration_min],
+          );
+          if (conflict.rows[0]) {
+            out.push({
+              classGroupId: cgId,
+              className: cgRow.name,
+              planId: null,
+              error: "bu sınıfın bu gün/saatinde zaten aktif plan var (çift rezervasyon atlandı)",
+            });
             continue;
           }
           try {

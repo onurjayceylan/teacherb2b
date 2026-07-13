@@ -395,6 +395,35 @@ export default function OkulPage() {
             </table>
           </div>
         )}
+        {/* Denetim tur 3: hedef IBAN yalnız kod-alma ânında görünüyordu; bekleyen havalesi olan
+            okul "hangi hesaba?" cevabını burada da bulmalı. */}
+        {pendingTopups.length > 0 ? (
+          bankAccounts.length > 0 ? (
+            <div style={{ marginTop: "0.5rem" }}>
+              <p className="muted" style={{ marginBottom: "0.25rem" }}>
+                Havaleyi şu hesaplardan birine gönderin (açıklamaya referans kodunu yazın):
+              </p>
+              <ul>
+                {bankAccounts.map((a) => (
+                  <li key={a.id}>
+                    <strong>{a.bankName}</strong> · {a.holder} — IBAN{" "}
+                    <span className="mono">{a.iban}</span>
+                    {a.swiftBic ? (
+                      <>
+                        {" "}
+                        · SWIFT <span className="mono">{a.swiftBic}</span>
+                      </>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="muted">
+              Hedef hesap bilgisi henüz tanımlı değil — platform yöneticisiyle iletişime geçin.
+            </p>
+          )
+        ) : null}
         <p className="muted">
           Dekontun açıklama alanına TN- ile başlayan referans kodunu mutlaka yazın — eşleştirme bu
           kodla yapılır. USD hesabına TL gönderirseniz bankanın uyguladığı kur geçerli olur;
